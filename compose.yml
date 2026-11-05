@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+    # log every statement: needed for the cache evidence in docs/redis.md
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: ./app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # inside Docker the hosts are the service names, not 127.0.0.1
+      DATABASE_URL: postgresql://music_app:${APP_PASSWORD}@postgres:5432/music
+      READONLY_DATABASE_URL: postgresql://music_ro:${READONLY_PASSWORD}@postgres:5432/music
+      MONGO_URL: mongodb://music_app:${MONGO_APP_PASSWORD}@mongo:27017/music
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      TZ: Europe/Lisbon
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  dbgate:
+    image: dbgate/dbgate
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - dbgate_data:/root/.dbgate
+    depends_on:
+      - postgres
+      - mongo
+      - redis
+
+volumes:
+  pg_data:
+  mongo_data:
+  redis_data:
+  dbgate_data:

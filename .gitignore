@@ -1,1 +1,23 @@
+# Secrets
 .env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+
+# Local data and backups
+*.dump
+*.sql.gz
+backups/

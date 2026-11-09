@@ -1,0 +1,165 @@
+erDiagram
+    label ||--o{ artist : "signs"
+    label |o--o{ album : "releases"
+    album ||--|{ track : "contains"
+    track ||--|{ track_artist : "credits"
+    artist ||--o{ track_artist : "appears in"
+    track ||--|{ track_genre : "has"
+    genre ||--o{ track_genre : "tags"
+
+    plan ||--o{ subscription : "defines"
+    listener ||--o{ subscription : "owns"
+    subscription ||--|{ subscription_member : "has"
+    listener ||--o{ subscription_member : "belongs to"
+    subscription ||--o{ payment : "is charged by"
+
+    listener ||--o{ play : "makes"
+    track ||--o{ play : "is played in"
+    listener ||--o{ track_like : "likes"
+    track ||--o{ track_like : "is liked in"
+    listener ||--o{ artist_follow : "follows"
+    artist ||--o{ artist_follow : "is followed in"
+
+    listener ||--o{ playlist : "owns"
+    playlist ||--o{ playlist_collaborator : "has"
+    listener ||--o{ playlist_collaborator : "collaborates"
+    playlist ||--o{ playlist_track : "holds"
+    track ||--o{ playlist_track : "is in"
+
+    artist ||--o{ payout : "receives"
+
+    label {
+        bigint id PK
+        text name UK
+        text country
+    }
+    artist {
+        bigint id PK
+        text name
+        text country
+        bigint label_id FK
+        boolean verified
+    }
+    album {
+        bigint id PK
+        text title
+        text type
+        date release_date
+        bigint label_id FK
+    }
+    track {
+        bigint id PK
+        bigint album_id FK
+        text title
+        int position
+        int duration_seconds
+        boolean explicit
+        text isrc UK
+    }
+    track_artist {
+        bigint track_id PK, FK
+        bigint artist_id PK, FK
+        text role PK
+        int position
+    }
+    genre {
+        bigint id PK
+        text name UK
+    }
+    track_genre {
+        bigint track_id PK, FK
+        bigint genre_id PK, FK
+    }
+
+    listener {
+        bigint id PK
+        text display_name
+        text email UK
+        text password_hash
+        date birth_date
+        text country
+        date registered_at
+    }
+    plan {
+        text name PK
+        numeric monthly_price
+        int max_members
+    }
+    subscription {
+        bigint id PK
+        bigint owner_id FK
+        text plan_name FK
+        date start_date
+        date end_date
+        text status
+    }
+    subscription_member {
+        bigint id PK
+        bigint subscription_id FK
+        bigint listener_id FK
+        date joined_at
+        date left_at
+    }
+    payment {
+        bigint id PK
+        bigint subscription_id FK
+        date month
+        numeric amount
+        timestamptz paid_at
+        text status
+        text provider_ref UK
+    }
+
+    play {
+        bigint id PK
+        bigint listener_id FK
+        bigint track_id FK
+        timestamptz started_at
+        int seconds_played
+        text device_type
+        text country
+    }
+    track_like {
+        bigint listener_id PK, FK
+        bigint track_id PK, FK
+        timestamptz liked_at
+    }
+    artist_follow {
+        bigint listener_id PK, FK
+        bigint artist_id PK, FK
+        timestamptz followed_at
+    }
+
+    playlist {
+        bigint id PK
+        bigint owner_id FK
+        text name
+        text description
+        text visibility
+        boolean is_collaborative
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    playlist_collaborator {
+        bigint playlist_id PK, FK
+        bigint listener_id PK, FK
+        timestamptz added_at
+    }
+    playlist_track {
+        bigint id PK
+        bigint playlist_id FK
+        int position
+        bigint track_id FK
+        bigint added_by FK
+        timestamptz added_at
+    }
+
+    payout {
+        bigint id PK
+        bigint artist_id FK
+        date month
+        numeric rate_per_stream
+        int stream_count
+        numeric amount
+        text status
+    }

@@ -16,7 +16,7 @@
 **Verification:** TODO: `docker compose up -d`, `docker compose build app`, `curl http://127.0.0.1:8000/health`, and a connection to each engine from DbGate.
 **Mistakes caught:** TODO: add any error found when running it, or write "none found".
 
-## Entry 1: Task distribution and time budget
+## Entry 3: Task distribution and time budget
 
 **Who:** Tiago.
 **Tool:** Gemini (2.5 Flash), gemini.google.com.
@@ -25,7 +25,7 @@
 **Verification:** cross-referenced task paths against the four mandatory Git areas (`postgres/`, `mongodb/`, `redis/`, `app/`) to ensure no member receives a 0-commit penalty.
 **Mistakes caught:** the AI's early versions assigned Lua scripts (contrary to our stack decisions) and initially forgot to distribute tasks across all 4 mandatory engine directories for every member. I corrected it to guarantee cross-directory compliance for everyone.
 
-## Entry 3: `scripts/setup.sh`
+## Entry 4: `scripts/setup.sh`
 
 **Who:** Leo.
 **Tool:** Claude (Sonnet 5.5), claude.ai.
@@ -34,7 +34,7 @@
 **Verification:** TODO: write what was run, for example `./scripts/setup.sh` twice in a row without errors, and a login to PostgreSQL as `music_app` and to MongoDB as the app user.
 **Mistakes caught:** TODO: write any error found, or "none found".
 
-## Entry 4: FastAPI app and Dockerfile
+## Entry 5: FastAPI app and Dockerfile
 
 **Who:** Leo.
 **Tool:** Claude (Sonnet 5.5), claude.ai.
@@ -42,3 +42,21 @@
 **Outcome:** kept the structure of both files. The `app/` folder had been created wrongly, so we deleted it and recreated it with `uv init`, then added FastAPI and uvicorn.
 **Verification:** TODO: write the commands run, for example `docker compose up -d --build app` and `curl http://localhost:8000/health`.
 **Mistakes caught:** the app folder was created wrongly by me and had to be recreated. TODO: add any error found in the Claude output, or write "none found".
+
+## Entry 6: ER diagram of the PostgreSQL schema
+
+**Who:** Leo.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** first draft of the Mermaid ER diagram for the README and `docs/postgres.md`, based on `c-music-streaming.md`. Claude proposed 24 tables; we simplified it to 19, and then split it into primary and secondary tables for the migrations.
+**Outcome:** kept the 19 tables, the keys and the relationships. Rermoved `album_artist`, `invite_code`, `playlist_change` and `stream_rate`: invite codes move to Redis with a TTL, and the rate per stream is now a column in `payout`. TODO: write any other change we made to the columns.
+**Verification:** checked every rule of "Where the rules are enforced" against the tables, and compared the final table list with the primary and secondary split. TODO: add that the diagram renders in Mermaid, and a review by another member.
+**Mistakes caught:** none found so far. TODO: add any error found when writing the migrations (for example a missing foreign key or a wrong key type).
+
+## Entry 7: Alembic migrations setup
+
+**Who:** Leo.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** explaining how to set up Alembic in `postgres/` (config, `env.py` reading `MIGRATION_DATABASE_URL`), how migration files are named and chained with `revision` and `down_revision`, and how to split the schema into `001_primary_tables.py` and `002_secondary_tables.py` with fixed ids so two people can work in parallel.
+**Outcome:** kept the structure: config in `postgres/`, migrations written by hand as SQL inside `op.execute`, no SQLAlchemy models, and the fixed ids `001` and `002`. TODO: write what we wrote ourselves (the SQL, constraints and the table order) and what we changed from the explanation.
+**Verification:** TODO: write what was run, for example `alembic upgrade head`, `downgrade -1` and `upgrade head` again, and `alembic current` showing `002 (head)`. Also add a check of the Alembic documentation if one was done.
+**Mistakes caught:** none found so far. TODO: add any error found when running the migrations, for example a wrong `down_revision` or a wrong table order.

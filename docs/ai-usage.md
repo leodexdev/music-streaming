@@ -24,3 +24,21 @@
 **Outcome:** The initial AI proposal allocated equal technical weights across engines without considering member expertise or Git verification risks. I requested a refined 15-hour budget per member (~12 hours coding, 3 hours buffer/research) where Leandro acts as repo owner (Docker/infrastructure), I handle core database architecture and Python concurrency control, and Paulo handles auxiliary features. I also rejected Lua script proposals, enforcing pure Python, SQL, and FastAPI libraries (`redis-py`, SQLAlchemy transaction locks). I kept the final markdown table structure and the automated bash verification script.
 **Verification:** cross-referenced task paths against the four mandatory Git areas (`postgres/`, `mongodb/`, `redis/`, `app/`) to ensure no member receives a 0-commit penalty.
 **Mistakes caught:** the AI's early versions assigned Lua scripts (contrary to our stack decisions) and initially forgot to distribute tasks across all 4 mandatory engine directories for every member. I corrected it to guarantee cross-directory compliance for everyone.
+
+## Entry 3: `scripts/setup.sh`
+
+**Who:** Leo.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** the order of the steps in `scripts/setup.sh`: PostgreSQL database, roles and extensions as the superuser, then migrations as the owner, then the MongoDB app user, collections, validators and indexes as root.
+**Outcome:** TODO: write what we kept from that order and what we wrote or changed ourselves (role names, variables from `.env`, making the script safe to run twice).
+**Verification:** TODO: write what was run, for example `./scripts/setup.sh` twice in a row without errors, and a login to PostgreSQL as `music_app` and to MongoDB as the app user.
+**Mistakes caught:** TODO: write any error found, or "none found".
+
+## Entry 4: FastAPI app and Dockerfile
+
+**Who:** Leo.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** first draft of `app/src/app/main.py` (a `/health` route) and `app/Dockerfile`, and help finding why the `app` container kept restarting.
+**Outcome:** kept the structure of both files. The `app/` folder had been created wrongly, so we deleted it and recreated it with `uv init`, then added FastAPI and uvicorn.
+**Verification:** TODO: write the commands run, for example `docker compose up -d --build app` and `curl http://localhost:8000/health`.
+**Mistakes caught:** the app folder was created wrongly by me and had to be recreated. TODO: add any error found in the Claude output, or write "none found".

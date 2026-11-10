@@ -60,3 +60,30 @@
 **Outcome:** kept the structure: config in `postgres/`, migrations written by hand as SQL inside `op.execute`, no SQLAlchemy models, and the fixed ids `001` and `002`. TODO: write what we wrote ourselves (the SQL, constraints and the table order) and what we changed from the explanation.
 **Verification:** TODO: write what was run, for example `alembic upgrade head`, `downgrade -1` and `upgrade head` again, and `alembic current` showing `002 (head)`. Also add a check of the Alembic documentation if one was done.
 **Mistakes caught:** none found so far. TODO: add any error found when running the migrations, for example a wrong `down_revision` or a wrong table order.
+
+## Entry 8: primary schema migration (`0001`)
+
+**Who:** Tiago.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** first draft of the Alembic migration for the primary tables (`postgres/migrations/versions/`), based on `c-music-streaming.md` and the ER diagram: catalogue, listeners, plans, subscriptions, members, invite codes, plays, playlists. It also drafted the member-limit trigger and the playlist track-count triggers.
+**Outcome:** kept the table structure, the partial unique indexes ("one current subscription per owner", "one current membership per listener"), the `UNIQUE (playlist_id, position) DEFERRABLE INITIALLY DEFERRED`, and the trigger that locks the subscription row with `FOR UPDATE` before counting members. Kept `playlist.track_count` with `CHECK (track_count BETWEEN 0 AND 500)` as a deliberate denormalisation, maintained by statement-level triggers so a `COPY` seed stays fast. TODO: write what we change to match the team convention (ids `001`/`002`, raw SQL in `op.execute`) and the tables removed in the ER diagram.
+**Verification:** `alembic upgrade head` ran without errors on an empty database. TODO: run `downgrade base` then `upgrade head`; insert a 3rd member in a duo subscription and a 501st playlist track and confirm both are refused; run the 50-request concurrency test.
+**Mistakes caught:** the draft included `album_artist` and `invite_code`, which the team had already removed from the ER diagram, and used `0001` and `op.create_table` instead of the team convention. It also assumed IDs and table names before checking the existing schema work. TODO: confirm the member-limit trigger holds under 50 simultaneous requests.
+
+## Entry 9: Alembic `env.py` and database connection
+
+**Who:** Tiago.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** diagnosing why `alembic upgrade head` failed with `Can't load plugin: sqlalchemy.dialects:driver` and later with `password authentication failed`, and changing `postgres/migrations/env.py` to read `MIGRATION_DATABASE_URL`.
+**Outcome:** the cause was the placeholder `sqlalchemy.url = driver://...` in `alembic.ini`. We kept the AI's fix (set `sqlalchemy.url` from the environment in `env.py`) and left credentials out of the `.ini`. TODO: write whether `env.py` also converts `postgresql://` to `postgresql+psycopg://` or whether `.env.example` is changed instead.
+**Verification:** the migration ran after the fix. We read the traceback to confirm the driver in use was `psycopg`.
+**Mistakes caught:** the AI first suggested running `alembic init` and creating `postgres/alembic/`, but the Alembic setup already existed in `postgres/migrations/`; we found this in the traceback. It also suggested a `pgtest` container that does not exist in our compose setup, and it said the `postgresql://` prefix would pick the wrong driver without checking it against our dependencies.
+
+## Entry 10: local environment troubleshooting
+
+**Who:** Tiago.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** getting the local stack to run: the `app` container restarting in a loop, the `.env` with Windows line endings, the missing `music_owner` role and `music` database, and a review of `scripts/setup.sh`.
+**Outcome:** kept the findings: `main.py` must be at `app/src/app/main.py` because of `PYTHONPATH=/app/src` and `app.main:app`; `sed -i 's/\r$//'` fixed the CRLF in `.env`; the owner role and database were created by hand locally, since the current `scripts/setup.sh` only wraps `docker compose up/down`. Rejected rewriting `setup.sh` ourselves, because it is Leo's task. TODO: add a `.gitattributes` with `eol=lf` if the team agrees.
+**Verification:** `curl localhost:8000/health` returned `ok`; `\dt` as `music_owner` and `alembic upgrade head` worked after creating the role. TODO: rerun everything from a clean clone once `setup.sh` is done.
+**Mistakes caught:** the AI used `<superuser>` as a placeholder in a command, which bash read as a redirection. It also assumed a role and database existed before checking with `\du`.

@@ -87,3 +87,48 @@
 **Outcome:** kept the findings: `main.py` must be at `app/src/app/main.py` because of `PYTHONPATH=/app/src` and `app.main:app`; `sed -i 's/\r$//'` fixed the CRLF in `.env`; the owner role and database were created by hand locally, since the current `scripts/setup.sh` only wraps `docker compose up/down`. Rejected rewriting `setup.sh` ourselves, because it is Leo's task. TODO: add a `.gitattributes` with `eol=lf` if the team agrees.
 **Verification:** `curl localhost:8000/health` returned `ok`; `\dt` as `music_owner` and `alembic upgrade head` worked after creating the role. TODO: rerun everything from a clean clone once `setup.sh` is done.
 **Mistakes caught:** the AI used `<superuser>` as a placeholder in a command, which bash read as a redirection. It also assumed a role and database existed before checking with `\du`.
+
+## Entry 11: where the primary-schema rules live
+
+**Who:** Tiago.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** advice on keeping `album_artist`, `invite_code` and `playlist_change` in PostgreSQL after Leo's ER diagram removed them, and on where two rules are enforced: "a track has at least one `main` artist" and "the free plan has no subscription".
+**Outcome:** the AI recommended keeping `album_artist` (the brief requires the main artists of an album in order) and `invite_code` in PostgreSQL (same transaction and `FOR UPDATE` as the join; in Redis a `FLUSHALL` would lose a source of truth). It also said `playlist_change` is needed because the brief asks who changed a playlist and when. This conflicts with Entry 6, where Leo moved invite codes to Redis. TODO: write the final decision we agreed with Leo and what we changed in the ER diagram. TODO: write where the two rules above are enforced (trigger or app).
+**Verification:** compared the proposal with the "Catalogue" and "Playlists" sections of the brief. TODO: review by Leo.
+**Mistakes caught:** TODO: add any error found. (The AI explained that a `CHECK` cannot count rows in another table, which is why "at least one main artist" needs a trigger or the app; check it against the PostgreSQL documentation.)
+
+## Entry 12: task plan for two members
+
+**Who:** Tiago.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** adapting `docs/project/tasks.md` after Paulo left the group: detailed tasks per file for both members, the target folder structure, who owns each flow (F1 to F8), and the order of work.
+**Outcome:** kept the split: Tiago owns F2, F3, F4, F5, the primary schema, the playback-events validator, the skip and active-device keys, and the concurrency test; Leo owns infrastructure, seed, export, pipelines, rebuild/verify, F1, F6, F7, F8. We replaced the template paths and names (`booking_service`, `app/services/cache_service.py`, `EXCLUDE`) with project ones and removed the "open decisions" section. TODO: write what Leo changed after reviewing it.
+**Verification:** compared the plan with the brief and with the four mandatory Git areas. TODO: confirm the content of Leo's migration `0002`; the AI wrote what it should contain without seeing it.
+**Mistakes caught:**
+- The AI first said that positions above n+1 would give 422 in the playlist scenario. That is wrong for the test: the playlist starts with 490 tracks and only grows, so positions 1 to 491 are always valid and the 40 refused requests are all 409.
+- The AI did not notice that the naive mode would never show a race, because the member-limit trigger and the playlist `CHECK` already protect the data. The test fixture (as owner) must disable those guards in naive mode and restore them afterwards.
+- The AI first proposed a Lua script for the skip counter, against our decision to use pure Python (Entry 3); it was corrected to `pipeline(transaction=True)` and `WATCH` with `redis-py`.
+- The AI first put Redis code under `app/services/`, where it would not count as a commit in `redis/`; it was moved to `redis/`.
+
+## Entry 13: application core (`config.py`, `database.py`, `main.py`)
+
+**Who:** Tiago.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** first draft of the connection layer in `app/src/app/`:
+- `config.py`: a pydantic `Settings` class that reads `DATABASE_URL`, `MONGO_URL` and `REDIS_URL` from `.env`, with `extra="ignore"` because `.env` holds many variables the app does not use, and a property that turns `postgresql://` into `postgresql+psycopg://`.
+- `database.py`: the SQLAlchemy engine and session factory (`pool_size=20`, `max_overflow=20`, `pool_pre_ping`), the pymongo client and database, and the Redis client with the password in the URL.
+- `main.py`: `/health` now runs `SELECT 1`, a MongoDB ping and a Redis `PING`.
+- `pyproject.toml` and `uv.lock`: dependencies added with `uv add` (`pydantic-settings`, `pymongo`, `redis`).
+**Outcome:** kept the structure of the three files. We chose a bigger connection pool than the default because the concurrency test sends 50 simultaneous requests and an exhausted pool would show up as 5xx errors. TODO: write what we changed (variable names from Leo's `.env.example`, anything we rejected).
+**Verification:** TODO: `docker compose up -d --build app`, `curl localhost:8000/health` returning ok with the three checks, and a connection as `music_app` once `setup.sh` creates the app role. TODO: confirm that no engine is reached as `postgres` or `root`.
+**Mistakes caught:** the AI wrote the files with assumed variable names before reading `.env.example`. It also warned that the app container can restart in a loop if the compose file does not pass the variables or uses `127.0.0.1` instead of the service names (`postgres`, `mongo`, `redis`). TODO: add any error found when running it.
+
+## Entry 14: `docs/postgres.md`
+
+**Who:** Tiago.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** structure and first draft of `docs/postgres.md` for the primary tables: what each table is for, each constraint, index and trigger with the rule it serves, both "where the rules are enforced" lists, the `track_count` denormalisation, and TODO sections for EXPLAIN and roles.
+**Outcome:** kept the structure and the tables from migration `0001`. Rules that depend on Leo's migration (`payment`, `payout`, likes, follows, grants on `play`) were left as TODO instead of being described as done. TODO: update the table list after the final decision in Entry 11.
+**Verification:** TODO: run the trigger tests (3rd member in a duo, 501st playlist track) and `downgrade base` then `upgrade head` before writing "verified"; add the EXPLAIN evidence after the seed.
+**Mistakes caught:** the AI listed some foreign keys (`subscription.plan_id`, `play.listener_id`, `play.track_id`) as not indexed. That is a gap in migration `0001` to decide on, not a finished design. TODO: add anything else found.
+

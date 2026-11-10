@@ -59,11 +59,9 @@ def upgrade():
         sa.CheckConstraint("amount >= 0", name="payment_amount_ck"),
         sa.CheckConstraint("status IN ('pending','paid','failed','refunded')", name="payment_status_ck"),
         sa.CheckConstraint("status <> 'paid' OR paid_at IS NOT NULL", name="payment_paid_at_ck"),
+        sa.UniqueConstraint("subscription_id", "month", name="payment_subscription_month_uq"),
     )
     op.create_index("payment_subscription_month_idx", "payment", ["subscription_id", "month"])
-    # one successful payment per subscription and month (failed ones can be retried)
-    op.create_index("payment_one_paid_per_month", "payment", ["subscription_id", "month"],
-                    unique=True, postgresql_where=sa.text("status = 'paid'"))
 
     op.create_table(
         "payout", pk(),
@@ -81,14 +79,112 @@ def upgrade():
         sa.UniqueConstraint("artist_id", "month", name="payout_artist_month_uq"),
     )
 
-    # --- grants: app reads and writes, read-only role only reads.
-    # Payments and payouts cannot be deleted by the app.
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON genre, track_genre, track_like, artist_follow TO music_app")
-    op.execute("GRANT SELECT, INSERT, UPDATE ON payment, payout TO music_app")
-    op.execute("GRANT SELECT ON genre, track_genre, track_like, artist_follow, payment, payout TO music_ro")
+    # --- trigger: a paid payout cannot be changed
+    op.execute("""
+    CREATE FUNCTION prevent_paid_payout_changes() RETURNS trigger AS $$
+    BEGIN
+        IF OLD.status = 'paid' THEN
+            RAISE EXCEPTION 'a paid payout cannot be changed'
+                USING ERRCODE = '23514';
+        END IF;
+
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        END IF;
+
+        RETURN NEW;
+    END $$ LANGUAGE plpgsql;
+    """)
+
+    op.execute("""
+    CREATE TRIGGER payout_paid_immutable
+    BEFORE UPDATE OR DELETE ON payout
+    FOR EACH ROW EXECUTE FUNCTION prevent_paid_payout_changes();
+    """)
+
+    # --- grants: app reads and writes secondary tables
+    op.execute("""
+    GRANT SELECT, INSERT, UPDATE, DELETE
+    ON genre, track_genre, track_like, artist_follow, payment, payout
+    TO music_app
+    """)
+
+    # --- play: app can only read and insert
+    op.execute("GRANT SELECT, INSERT ON play TO music_app")
+    op.execute("REVOKE UPDATE, DELETE ON play FROM music_app")
+
+    # --- read-only role
+    op.execute("""
+        GRANT SELECT
+        ON genre, track_genre, track_like, artist_follow, payment, payout, play
+        TO music_ro;
+    """)
+
+    # --- default privileges for future tables
+    op.execute("""
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO music_app
+    """)
+
+    op.execute("""
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT ON TABLES TO music_ro
+    """)
+
+    op.execute("""
+    GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO music_app
+    """)
+
+    op.execute("""
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO music_app
+    """)
 
 
 def downgrade():
-    # reverse order; dropping a table also drops its indexes and grants
+    # --- remove payout trigger and function
+    op.execute("DROP TRIGGER IF EXISTS payout_paid_immutable ON payout")
+    op.execute("DROP FUNCTION IF EXISTS prevent_paid_payout_changes()")
+
+    # --- revoke permissions on play
+    op.execute("REVOKE SELECT, INSERT ON play FROM music_app")
+    op.execute("REVOKE SELECT ON play FROM music_ro")
+
+    # --- revoke permissions on secondary tables
+    op.execute("""
+    REVOKE SELECT, INSERT, UPDATE, DELETE
+    ON genre, track_genre, track_like, artist_follow, payment, payout
+    FROM music_app
+    """)
+
+    op.execute("""
+    REVOKE SELECT
+    ON genre, track_genre, track_like, artist_follow, payment, payout
+    FROM music_ro
+    """)
+
+    # --- remove default privileges
+    op.execute("""
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM music_app
+    """)
+
+    op.execute("""
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    REVOKE SELECT ON TABLES FROM music_ro
+    """)
+
+    # --- revoke sequence permissions
+    op.execute("""
+    REVOKE USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public FROM music_app
+    """)
+    
+    op.execute("""
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    REVOKE USAGE, SELECT ON SEQUENCES FROM music_app
+    """)
+
+
+    # --- drop tables in reverse order
     for t in ["payout", "payment", "artist_follow", "track_like", "track_genre", "genre"]:
         op.drop_table(t)

@@ -1,129 +1,94 @@
-"""secondary tables: genre, track_genre, track_like, artist_follow, payment, payout
-
-Revision ID: 0002
-Revises: 0001
-Create Date: 2026-11-10
-
-These tables are leaves: nothing else in the schema points to them.
-Runs as music_owner, so the tables are owned by music_owner.
-"""
+"""secondary schema"""
 from alembic import op
+import sqlalchemy as sa
 
 revision = "0002"
 down_revision = "0001"
 branch_labels = None
 depends_on = None
 
-
-UPGRADE_STATEMENTS = [
-    # ------------------------------------------------------------------ genre
-    """
-    CREATE TABLE genre (
-        id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-        name text   NOT NULL,
-        CONSTRAINT uq_genre_name UNIQUE (name),
-        CONSTRAINT ck_genre_name_not_blank CHECK (btrim(name) <> '')
-    )
-    """,
-    # ------------------------------------------------------------ track_genre
-    """
-    CREATE TABLE track_genre (
-        track_id bigint NOT NULL REFERENCES track (id) ON DELETE CASCADE,
-        genre_id bigint NOT NULL REFERENCES genre (id) ON DELETE RESTRICT,
-        PRIMARY KEY (track_id, genre_id)
-    )
-    """,
-    "CREATE INDEX ix_track_genre_genre_id ON track_genre (genre_id)",
-    # ------------------------------------------------------------- track_like
-    """
-    CREATE TABLE track_like (
-        listener_id bigint      NOT NULL REFERENCES listener (id) ON DELETE CASCADE,
-        track_id    bigint      NOT NULL REFERENCES track (id)    ON DELETE CASCADE,
-        liked_at    timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (listener_id, track_id)
-    )
-    """,
-    "CREATE INDEX ix_track_like_track_id ON track_like (track_id)",
-    # ---------------------------------------------------------- artist_follow
-    """
-    CREATE TABLE artist_follow (
-        listener_id bigint      NOT NULL REFERENCES listener (id) ON DELETE CASCADE,
-        artist_id   bigint      NOT NULL REFERENCES artist (id)   ON DELETE CASCADE,
-        followed_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (listener_id, artist_id)
-    )
-    """,
-    "CREATE INDEX ix_artist_follow_artist_id ON artist_follow (artist_id)",
-    # ---------------------------------------------------------------- payment
-    # Financial record: RESTRICT, so a subscription with payments cannot be
-    # deleted by accident.
-    """
-    CREATE TABLE payment (
-        id              bigint        GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-        subscription_id bigint        NOT NULL REFERENCES subscription (id) ON DELETE RESTRICT,
-        month           date          NOT NULL,
-        amount          numeric(10,2) NOT NULL,
-        paid_at         timestamptz,
-        status          text          NOT NULL DEFAULT 'pending',
-        provider_ref    text,
-        CONSTRAINT uq_payment_provider_ref UNIQUE (provider_ref),
-        CONSTRAINT ck_payment_month_first_day CHECK (EXTRACT(DAY FROM month) = 1),
-        CONSTRAINT ck_payment_amount CHECK (amount >= 0),
-        CONSTRAINT ck_payment_status
-            CHECK (status IN ('pending', 'paid', 'failed', 'refunded')),
-        CONSTRAINT ck_payment_paid_has_date
-            CHECK (status <> 'paid' OR paid_at IS NOT NULL)
-    )
-    """,
-    "CREATE INDEX ix_payment_subscription_month ON payment (subscription_id, month)",
-    # at most one successful payment per subscription and month (failed
-    # attempts can be retried)
-    """
-    CREATE UNIQUE INDEX uq_payment_one_paid_per_month
-        ON payment (subscription_id, month)
-        WHERE status = 'paid'
-    """,
-    # ----------------------------------------------------------------- payout
-    """
-    CREATE TABLE payout (
-        id              bigint         GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-        artist_id       bigint         NOT NULL REFERENCES artist (id) ON DELETE RESTRICT,
-        month           date           NOT NULL,
-        rate_per_stream numeric(10,6)  NOT NULL,
-        stream_count    integer        NOT NULL DEFAULT 0,
-        amount          numeric(12,2)  NOT NULL DEFAULT 0,
-        status          text           NOT NULL DEFAULT 'pending',
-        CONSTRAINT uq_payout_artist_month UNIQUE (artist_id, month),
-        CONSTRAINT ck_payout_month_first_day CHECK (EXTRACT(DAY FROM month) = 1),
-        CONSTRAINT ck_payout_rate CHECK (rate_per_stream >= 0),
-        CONSTRAINT ck_payout_stream_count CHECK (stream_count >= 0),
-        CONSTRAINT ck_payout_amount CHECK (amount >= 0),
-        CONSTRAINT ck_payout_status
-            CHECK (status IN ('pending', 'paid', 'failed'))
-    )
-    """,
-    # ----------------------------------------------------------------- grants
-    # music_app: normal read/write. Payments and payouts cannot be deleted.
-    "GRANT SELECT, INSERT, UPDATE, DELETE ON genre, track_genre, track_like, artist_follow TO music_app",
-    "GRANT SELECT, INSERT, UPDATE ON payment, payout TO music_app",
-    # music_ro: reports and the MongoDB export
-    "GRANT SELECT ON genre, track_genre, track_like, artist_follow, payment, payout TO music_ro",
-]
+BIG = sa.BigInteger
+TS = sa.DateTime(timezone=True)
 
 
-def upgrade() -> None:
-    for statement in UPGRADE_STATEMENTS:
-        op.execute(statement)
+def pk():
+    return sa.Column("id", BIG, sa.Identity(), primary_key=True)
 
 
-def downgrade() -> None:
-    # reverse order of creation; dropping a table also drops its indexes and grants
-    for table in (
-        "payout",
-        "payment",
-        "artist_follow",
-        "track_like",
+def upgrade():
+    op.create_table(
+        "genre", pk(),
+        sa.Column("name", sa.Text, nullable=False, unique=True),
+        sa.CheckConstraint("btrim(name) <> ''", name="genre_name_ck"),
+    )
+
+    op.create_table(
         "track_genre",
-        "genre",
-    ):
-        op.execute(f"DROP TABLE IF EXISTS {table}")
+        sa.Column("track_id", BIG, sa.ForeignKey("track.id", ondelete="CASCADE"), primary_key=True),
+        sa.Column("genre_id", BIG, sa.ForeignKey("genre.id", ondelete="RESTRICT"), primary_key=True),
+    )
+    op.create_index("track_genre_genre_idx", "track_genre", ["genre_id"])
+
+    op.create_table(
+        "track_like",
+        sa.Column("listener_id", BIG, sa.ForeignKey("listener.id", ondelete="CASCADE"), primary_key=True),
+        sa.Column("track_id", BIG, sa.ForeignKey("track.id", ondelete="CASCADE"), primary_key=True),
+        sa.Column("liked_at", TS, nullable=False, server_default=sa.text("now()")),
+    )
+    op.create_index("track_like_track_idx", "track_like", ["track_id"])
+
+    op.create_table(
+        "artist_follow",
+        sa.Column("listener_id", BIG, sa.ForeignKey("listener.id", ondelete="CASCADE"), primary_key=True),
+        sa.Column("artist_id", BIG, sa.ForeignKey("artist.id", ondelete="CASCADE"), primary_key=True),
+        sa.Column("followed_at", TS, nullable=False, server_default=sa.text("now()")),
+    )
+    op.create_index("artist_follow_artist_idx", "artist_follow", ["artist_id"])
+
+    # financial records: RESTRICT, so a subscription or artist with money
+    # records cannot be deleted by accident
+    op.create_table(
+        "payment", pk(),
+        sa.Column("subscription_id", BIG, sa.ForeignKey("subscription.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("month", sa.Date, nullable=False),
+        sa.Column("amount", sa.Numeric(10, 2), nullable=False),
+        sa.Column("paid_at", TS),
+        sa.Column("status", sa.Text, nullable=False, server_default="pending"),
+        sa.Column("provider_ref", sa.Text, unique=True),
+        sa.CheckConstraint("EXTRACT(DAY FROM month) = 1", name="payment_month_ck"),
+        sa.CheckConstraint("amount >= 0", name="payment_amount_ck"),
+        sa.CheckConstraint("status IN ('pending','paid','failed','refunded')", name="payment_status_ck"),
+        sa.CheckConstraint("status <> 'paid' OR paid_at IS NOT NULL", name="payment_paid_at_ck"),
+    )
+    op.create_index("payment_subscription_month_idx", "payment", ["subscription_id", "month"])
+    # one successful payment per subscription and month (failed ones can be retried)
+    op.create_index("payment_one_paid_per_month", "payment", ["subscription_id", "month"],
+                    unique=True, postgresql_where=sa.text("status = 'paid'"))
+
+    op.create_table(
+        "payout", pk(),
+        sa.Column("artist_id", BIG, sa.ForeignKey("artist.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("month", sa.Date, nullable=False),
+        sa.Column("rate_per_stream", sa.Numeric(10, 6), nullable=False),
+        sa.Column("stream_count", sa.Integer, nullable=False, server_default="0"),
+        sa.Column("amount", sa.Numeric(12, 2), nullable=False, server_default="0"),
+        sa.Column("status", sa.Text, nullable=False, server_default="pending"),
+        sa.CheckConstraint("EXTRACT(DAY FROM month) = 1", name="payout_month_ck"),
+        sa.CheckConstraint("rate_per_stream >= 0", name="payout_rate_ck"),
+        sa.CheckConstraint("stream_count >= 0", name="payout_stream_count_ck"),
+        sa.CheckConstraint("amount >= 0", name="payout_amount_ck"),
+        sa.CheckConstraint("status IN ('pending','paid','failed')", name="payout_status_ck"),
+        sa.UniqueConstraint("artist_id", "month", name="payout_artist_month_uq"),
+    )
+
+    # --- grants: app reads and writes, read-only role only reads.
+    # Payments and payouts cannot be deleted by the app.
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON genre, track_genre, track_like, artist_follow TO music_app")
+    op.execute("GRANT SELECT, INSERT, UPDATE ON payment, payout TO music_app")
+    op.execute("GRANT SELECT ON genre, track_genre, track_like, artist_follow, payment, payout TO music_ro")
+
+
+def downgrade():
+    # reverse order; dropping a table also drops its indexes and grants
+    for t in ["payout", "payment", "artist_follow", "track_like", "track_genre", "genre"]:
+        op.drop_table(t)

@@ -183,3 +183,23 @@ The database strictly enforces the principle of least privilege using three dist
 1. **Owner Role (`owner`):** Executed during deployment to apply Alembic migrations and modify table definitions.
 2. **Application Role (`app`):** Used by the FastAPI backend. Granted operational CRUD privileges with no DDL or superuser access.
 3. **Read-Only Role (`read_only`):** Used exclusively by analytical export scripts (`mongodb/export.py`).
+
+## Catalogue and payout API (F1, F7)
+
+- `GET /catalogue/tracks/search?q=...` searches for a title fragment using
+  parameterized `ILIKE`; the query is compatible with the `pg_trgm` index.
+- `GET /catalogue/albums/{album_id}` returns an album, its ordered artists,
+  and ordered tracks.
+- `GET /catalogue/artists/{artist_id}` returns an artist and their albums.
+- `POST /payouts/close` accepts `{"month":"YYYY-MM","rate_per_stream":0.004}`.
+  Month boundaries are Lisbon-local. Plays shorter than 30 seconds are
+  excluded. Each stream's value is divided by the number of main artists on
+  its track, then each artist's monthly amount is rounded half-up to cents.
+  The payout `stream_count` is the count of qualifying plays on that artist's
+  main tracks; `amount` records the artist's allocated share. A payout row is
+  created for each main artist, including zero-stream artists, so the unique
+  artist/month constraint makes a second close fail with HTTP 409.
+- Migration `0005_application_core_grants.py` gives `music_app` read access to
+  the catalogue, listeners and plans, and write access to subscription and
+  playlist tables used by the app. `play` remains protected by its existing
+  SELECT/INSERT-only grant.

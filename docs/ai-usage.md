@@ -232,3 +232,21 @@
 **Outcome:** added `redis/verify.py` to compare current and previous charts, today's per-track stream counters, and listeners' last-50 histories. The verifier reports missing, unexpected, incorrectly typed or mismatched keys and exits nonzero when differences exist. Documented how to run it in `docs/redis.md`.
 **Verification:** compilation and `git diff --check` passed. After rebuilding, the verifier exited `0` against the local PostgreSQL/Redis setup, where the `play` table is empty. A temporary unexpected Redis key made it report the mismatch and exit `1`, then the test removed that key. Synthetic comparisons also passed for charts, counters, ordered histories and a value mismatch.
 **Mistakes caught:** the first synthetic harness loaded a second copy of the rebuild module, so its SQL statement identity checks failed. Using the shared imported module fixed the harness; no application-code change was needed.
+
+## Entry 24: MongoDB setup script integration
+
+**Who:** Leandro.
+**Tool:** Copilot in VS Code.
+**For what:** fixing `scripts/setup.sh` to run the existing Python MongoDB collection setup instead of the nonexistent `mongodb/setup.js`.
+**Outcome:** setup now requires `MONGO_ROOT_URL`, invokes `mongodb/setup_collections.py` through `uv`, and reports setup failures. The existing MongoDB app-user creation remains unchanged.
+**Verification:** `bash -n scripts/setup.sh` passed, and `./scripts/setup.sh mongo` completed successfully twice in a row.
+**Mistakes caught:** the setup script referenced a JavaScript file that is not present in the repository; the implemented collection setup is Python.
+
+## Entry 25: deterministic full-size seed pipeline (Task 1.9)
+
+**Who:** Leandro.
+**Tool:** Copilot in VS Code.
+**For what:** implementing the brief's repeatable PostgreSQL and MongoDB fixtures and chaining the report export and Redis rebuild.
+**Outcome:** replaced the small PostgreSQL sample with seeded Faker content and deterministic, streaming `COPY` loads for the required catalogue, listeners, subscriptions/payments, plays, playlists and relationships. Subscription memberships use batched inserts so the database capacity trigger runs for every row. Added 50,000 idempotently upserted MongoDB playback events within the last 30 days. `scripts/seed.sh` now confirms before truncating PostgreSQL by default, supports `--yes`, and stops if a pipeline step fails.
+**Verification:** Python compilation and shell syntax checks passed. In-memory checks confirmed required row counts, full plan memberships, 1,094,000 playlist entries, 500,000 unique likes and follows each, 25% short plays, and at least 1,125 qualifying plays for each of the 200 hot tracks. A temporary PostgreSQL table confirmed that `COPY` fires statement triggers with transition rows, preserving playlist counts. The MongoDB seeder ran twice locally and retained exactly 50,000 recent events, confirming idempotency. The destructive full-size PostgreSQL load was not run against the shared local database.
+**Mistakes caught:** generator review found that the first hot-track distribution aligned short-play selection with track IDs, which would have left fewer than 200 tracks with 1,000 streams. The short-play schedule was changed to rotate by play cycle so each hot track gets enough qualifying streams.

@@ -55,4 +55,26 @@ redis-cli -u redis://:change-me-redis@127.0.0.1:6379/0 TTL active_device:777
 
 ## Class
 
-Redis data here is ephemeral by design: it is session-like, short-lived and not the source of truth for the relational database.
+Skip counters and active-device keys are ephemeral. The charts, daily stream
+counters and last-play lists below are derived from PostgreSQL, which remains
+the source of truth.
+
+## Derived keys rebuilt from PostgreSQL
+
+`redis/rebuild.py` reads the `play` table with the read-only PostgreSQL role.
+Streams are plays with `seconds_played >= 30`; day boundaries use
+`Europe/Lisbon`. Run `uv run --project app python redis/rebuild.py` to rebuild
+these keys. It removes only the `charts:*`, `streams:*` and `last50:*` key
+patterns; it does not run `FLUSHALL`.
+
+| Key pattern | Structure and example | TTL and class | Commands |
+|---|---|---|---|
+| `charts:{YYYYMMDD}:global` | Sorted set; member is a track ID and score is its stream count. Example: `charts:20261111:global` contains `{"1204": 82}`. | Current-day chart expires at the next Lisbon midnight; previous-day chart expires after 7 days. **Derived.** The rebuild uses `ZADD` and `EXPIRE` in one `MULTI/EXEC`. | Rebuild: `ZADD`, `EXPIRE`; read: `ZREVRANGE key 0 49 WITHSCORES`. |
+| `charts:{YYYYMMDD}:country:{country}` | Same sorted-set shape, limited to a country. Example: `charts:20261111:country:PT`. | Same as global chart. **Derived.** | Rebuild: `ZADD`, `EXPIRE`; read: `ZREVRANGE key 0 49 WITHSCORES`. |
+| `streams:{YYYYMMDD}:track:{track_id}` | String containing today's stream count. Example: `streams:20261111:track:1204` has value `82`. | Expires at the next Lisbon midnight. `SET ... EX` writes value and TTL atomically. **Derived.** | Rebuild: `SET key value EX seconds`; read: `GET`. |
+| `last50:{listener_id}` | List of track IDs, newest first. Example: `last50:777` might contain `["1204", "310", "1204"]`. | No TTL; the bounded list can be rebuilt from play history. **Derived.** | Rebuild: transactional `DEL` + `RPUSH`; read: `LRANGE key 0 49`. |
+
+Charts contain at most 50 tracks, ordered by stream count with track ID as the
+tie-breaker. Daily stream counters are created only for tracks with one or more
+streams. Last-play lists include short plays, since they represent the last
+tracks played, not only qualifying streams.

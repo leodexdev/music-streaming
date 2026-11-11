@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Wipes old data and seeds PostgreSQL, MongoDB, and Redis with fresh dummy data.
-# Each part runs only if its seed script exists.
+# Replaces PostgreSQL fixture data, seeds MongoDB events, exports reports and rebuilds Redis.
 #
 # Usage:
-#   ./scripts/seed.sh                 (runs all three if available)
-#   ./scripts/seed.sh postgres        (only seed PostgreSQL)
+#   ./scripts/seed.sh                 (runs the full pipeline; asks before truncating PostgreSQL)
+#   ./scripts/seed.sh --yes           (same, without the confirmation prompt)
+#   ./scripts/seed.sh postgres        (only seed PostgreSQL; asks before truncating)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -24,6 +24,35 @@ ok()   { DONE+=("$1");    echo "    ok: $1"; }
 skip() { SKIPPED+=("$1"); echo "    SKIPPED: $1"; }
 fail() { FAILED+=("$1");  echo "    FAILED: $1" >&2; }
 
+CONFIRM_RESET=0
+TARGETS=()
+for arg in "$@"; do
+  case "$arg" in
+    -y|--yes) CONFIRM_RESET=1 ;;
+    *) TARGETS+=("$arg") ;;
+  esac
+done
+if [ "${#TARGETS[@]}" -eq 0 ]; then
+  TARGETS=(postgres mongo export redis)
+fi
+
+for target in "${TARGETS[@]}"; do
+  case "$target" in
+    postgres) needs_postgres_reset=1 ;;
+    mongo|export|redis) ;;
+    *) echo "Unknown target: $target (use postgres, mongo, export or redis)" >&2; exit 1 ;;
+  esac
+done
+if [ "${needs_postgres_reset:-0}" -eq 1 ] && [ "$CONFIRM_RESET" -ne 1 ]; then
+  echo "WARNING: PostgreSQL seed truncates project data and replaces it with a large fixture." >&2
+  if [ ! -t 0 ]; then
+    echo "Run interactively or pass --yes only if you intend to replace the data." >&2
+    exit 1
+  fi
+  read -r -p "Continue and replace PostgreSQL fixture data? [y/N] " answer
+  [ "$answer" = "y" ] || { echo "Cancelled."; exit 1; }
+fi
+
 # ---------------------------------------------------------------- PostgreSQL
 seed_postgres() {
   echo "==> PostgreSQL"
@@ -32,7 +61,7 @@ seed_postgres() {
     return
   fi
 
-  if uv run --project app python postgres/seed.py; then
+  if uv run --project app python postgres/seed.py --confirm-reset; then
     ok "PostgreSQL seeded successfully"
   else
     fail "PostgreSQL seeding (see error above)"
@@ -89,17 +118,17 @@ seed_redis() {
 }
 
 # ---------------------------------------------------------------------- main
-TARGETS=("$@")
-[ "${#TARGETS[@]}" -gt 0 ] || TARGETS=(postgres mongo export redis)
-
 for t in "${TARGETS[@]}"; do
   case "$t" in
     postgres) seed_postgres ;;
     mongo)    seed_mongo ;;
     export)   export_reports ;;
     redis)    seed_redis ;;
-    *) echo "Unknown target: $t (use postgres, mongo, export or redis)" >&2; exit 1 ;;
   esac
+  if [ "${#FAILED[@]}" -gt 0 ]; then
+    echo "Stopping pipeline after a failed step." >&2
+    break
+  fi
 done
 
 echo

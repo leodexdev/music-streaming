@@ -104,7 +104,7 @@ mongo_root() {
 setup_mongo() {
   echo "==> MongoDB"
   local miss
-  miss=$(missing_vars MONGO_ROOT_USER MONGO_ROOT_PASSWORD MONGO_APP_PASSWORD)
+  miss=$(missing_vars MONGO_ROOT_USER MONGO_ROOT_PASSWORD MONGO_APP_PASSWORD MONGO_ROOT_URL)
   if [ -n "$miss" ]; then
     skip "MongoDB: add these variables to .env: $miss"
     return
@@ -123,12 +123,14 @@ setup_mongo() {
   else fail "MongoDB app user"; return
   fi
 
-  if [ ! -f mongodb/setup.js ]; then
-    skip "MongoDB collections, validators and indexes: mongodb/setup.js not found yet"
-  elif mongo_root music < mongodb/setup.js >/dev/null; then
-    ok "collections, validators and indexes (mongodb/setup.js)"
+  if [ ! -f mongodb/setup_collections.py ]; then
+    skip "MongoDB collections, validators and indexes: mongodb/setup_collections.py not found"
+  elif ! command -v uv >/dev/null 2>&1; then
+    skip "MongoDB collections, validators and indexes: uv is not installed"
+  elif uv run --project app python mongodb/setup_collections.py; then
+    ok "collections, validators and indexes (mongodb/setup_collections.py)"
   else
-    fail "mongodb/setup.js (run it by hand to see the error)"
+    fail "mongodb/setup_collections.py (run it by hand to see the error)"
   fi
 }
 

@@ -67,3 +67,23 @@ The project deliberately separates the SQL guarantees from the application logic
 - `FOR UPDATE` orders the competing transactions when the same row is being mutated.
 
 This is the same pattern used for the subscription join rule and the playlist edit rule in the Tiago side of the project.
+
+## Final validation runs (2026-11-11)
+
+The real-mode scenarios were each run three times against the local Compose
+app at `http://127.0.0.1:8000`. Every run returned the expected counts and zero
+5xx/errors:
+
+| Scenario | Run | Requests | Accepted | Refused | 5xx/errors | Final invariant |
+|---|---:|---:|---:|---:|---:|---|
+| Family-plan join | 1 | 50 | 4 | 46 | 0 | 6 active members |
+| Family-plan join | 2 | 50 | 4 | 46 | 0 | 6 active members |
+| Family-plan join | 3 | 50 | 4 | 46 | 0 | 6 active members |
+| Collaborative playlist | 1 | 50 | 10 | 40 | 0 | Exactly 500 tracks, positions 1–500 |
+| Collaborative playlist | 2 | 50 | 10 | 40 | 0 | Exactly 500 tracks, positions 1–500 |
+| Collaborative playlist | 3 | 50 | 10 | 40 | 0 | Exactly 500 tracks, positions 1–500 |
+
+The naive modes were not run during this validation because they temporarily
+disable the subscription trigger or drop playlist constraints on the shared
+development database. Run those demonstrations only against a disposable
+database, and capture their outputs before a course delivery.

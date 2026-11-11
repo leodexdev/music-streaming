@@ -117,41 +117,73 @@ FOR EACH ROW EXECUTE FUNCTION enforce_max_members();
 | **Plan Capacity Limits** | PostgreSQL | `BEFORE INSERT` Trigger with `FOR UPDATE` lock on `subscription` |
 | **Playlist 500 Track Upper Bound** | PostgreSQL | `CHECK (track_count BETWEEN 0 AND 500)` + Statement Triggers |
 | **Atomic Track Reordering** | PostgreSQL | `DEFERRABLE INITIALLY DEFERRED` Unique Constraint |
-| **Invite Code Expiry (7-day TTL)** | Redis / FastAPI | Redis Key Expiry (`EXPIRE`) + API timestamp validation |
+| **Invite Code Expiry (7-day TTL)** | PostgreSQL / FastAPI | `invite_code.expires_at` plus an API timestamp check; no Redis invite key is used |
 | **Free Listener Skip Limits** | Redis / FastAPI | Atomic `redis-py` pipeline counters (`INCR` + `EXPIRE`) |
 | **Single Active Device per Listener** | Redis / FastAPI | Heartbeat session keys in Redis (`SET ... EX 60`) |
 
 ---
 
-## 5. Performance Indexing & EXPLAIN (ANALYZE, BUFFERS)
+## 5. Performance indexing and EXPLAIN evidence
 
-Execution plans and memory buffer metrics collected against the seeded database environment:
+The following plans were measured on the seeded local database (300,000 tracks
+and 2,100,000 plays). For each “without index” measurement, the named index was
+dropped inside a transaction and restored with `ROLLBACK`; no index was left
+dropped. Timings are one local run and will vary by machine and cache state.
 
-### Query Benchmark: Playback History by Listener
-* **Query Executed:**
-  ```sql
-  EXPLAIN (ANALYZE, BUFFERS) 
-  SELECT * FROM play 
-  WHERE listener_id = 1 
-  ORDER BY started_at DESC 
-  LIMIT 10;
-  ```
-* **Execution Plan Output:**
-  ```text
-  Limit  (cost=17.90..17.91 rows=3 width=100) (actual time=0.208..0.209 rows=0 loops=1)
-    Buffers: shared hit=3
-    ->  Sort  (cost=17.90..17.91 rows=3 width=100) (actual time=0.165..0.166 rows=0 loops=1)
-          Sort Key: started_at DESC
-          Sort Method: quicksort  Memory: 25kB
-          Buffers: shared hit=3
-          ->  Seq Scan on play  (cost=0.00..17.88 rows=3 width=100) (actual time=0.014..0.014 rows=0 loops=1)
-                Filter: (listener_id = 1)
-  Planning:
-    Buffers: shared hit=59 read=1
-  Planning Time: 0.676 ms
-  Execution Time: 0.553 ms
-  ```
-* **Index Reference:** `play_listener_started_desc_idx` is active on `play(listener_id, started_at DESC)` to scale effectively under production workloads.
+Queries measured:
+
+```sql
+SELECT id, started_at FROM play
+WHERE listener_id = 1
+ORDER BY started_at DESC LIMIT 10;
+
+SELECT id, started_at FROM play
+WHERE track_id = 1 AND started_at >= now() - interval '30 days';
+
+SELECT id, title FROM track
+WHERE title ILIKE '%beautiful%' LIMIT 20;
+```
+
+For the no-index measurements, the corresponding index was dropped and the
+same query explained in a transaction, followed by `ROLLBACK`, for example:
+
+```sql
+BEGIN;
+DROP INDEX play_listener_started_desc_idx;
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT id, started_at FROM play
+WHERE listener_id = 1
+ORDER BY started_at DESC LIMIT 10;
+ROLLBACK;
+```
+
+| Query and index | With index | Without index |
+|---|---|---|
+| Listener 1's newest plays; `play_listener_started_desc_idx` | Index Scan, 10 rows, 0.118 ms, 13 buffers | Parallel Seq Scan + sort, 10 rows, 47.587 ms, 19,738 buffers |
+| Track 1 plays in the last 30 days; `play_track_started_idx` | Index Scan, 125 rows, 0.336 ms, 128 buffers | Parallel Seq Scan, 125 rows, 42.045 ms, 19,664 buffers |
+| Title contains “beautiful”; `track_title_trgm_idx` | Bitmap Index/Heap Scan, 20 returned, 1.984 ms, 39 buffers | Parallel Seq Scan, 20 returned, 5.986 ms, 61 buffers |
+
+Example indexed plans:
+
+```text
+Index Scan using play_listener_started_desc_idx on play
+  Index Cond: (listener_id = 1)
+  Execution Time: 0.118 ms
+
+Index Scan using play_track_started_idx on play
+  Index Cond: ((track_id = 1) AND (started_at >= (now() - '30 days'::interval)))
+  Execution Time: 0.336 ms
+
+Bitmap Heap Scan on track
+  Recheck Cond: (title ~~* '%beautiful%'::text)
+  -> Bitmap Index Scan on track_title_trgm_idx
+       Index Cond: (title ~~* '%beautiful%'::text)
+  Execution Time: 1.984 ms
+```
+
+In this dataset the listener-history and track/month indexes avoided scanning
+the full 2.1M-row play table. The trigram index also reduced buffers and
+elapsed time for the title search.
 
 ---
 
@@ -176,10 +208,37 @@ Positions are exactly 1..500 with no duplicates: True -> rule HOLDS
 
 This result confirms the playlist logic is holding the invariant under concurrent inserts while preserving the 500-track maximum and the no-gap/no-duplicate ordering rule.
 
-## 7. Database Roles & Security Model
+## 7. Database roles and security model
 
-The database strictly enforces the principle of least privilege using three distinct roles created in `scripts/setup.sh`:
+The database uses three roles created by `scripts/setup.sh`:
 
-1. **Owner Role (`owner`):** Executed during deployment to apply Alembic migrations and modify table definitions.
-2. **Application Role (`app`):** Used by the FastAPI backend. Granted operational CRUD privileges with no DDL or superuser access.
-3. **Read-Only Role (`read_only`):** Used exclusively by analytical export scripts (`mongodb/export.py`).
+1. **`music_owner`:** owns the schema and runs Alembic migrations.
+2. **`music_app`:** used by the API; it receives only the table grants described
+   by the migrations. It cannot run DDL or act as a superuser.
+3. **`music_ro`:** read-only access for analytical export scripts such as
+   `mongodb/export.py`.
+
+## Catalogue and payout API (F1, F7)
+
+- `GET /catalogue/tracks/search?q=...` searches for a title fragment using
+  parameterized `ILIKE`; the query is compatible with the `pg_trgm` index.
+- `GET /catalogue/albums/{album_id}` returns an album, its ordered artists,
+  and ordered tracks.
+- `GET /catalogue/artists/{artist_id}` returns an artist and their albums.
+- `POST /payouts/close` accepts `{"month":"YYYY-MM","rate_per_stream":0.004}`.
+  Month boundaries are Lisbon-local. Plays shorter than 30 seconds are
+  excluded. Each stream's value is divided by the number of main artists on
+  its track, then each artist's monthly amount is rounded half-up to cents.
+  The payout `stream_count` is the count of qualifying plays on that artist's
+  main tracks; `amount` records the artist's allocated share. A payout row is
+  created for each main artist, including zero-stream artists, so the unique
+  artist/month constraint makes a second close fail with HTTP 409.
+- Migration `0005_application_core_grants.py` gives `music_app` read access to
+  the catalogue, listeners and plans, and write access to subscription and
+  playlist tables used by the app. `play` remains protected by its existing
+  SELECT/INSERT-only grant.
+- **Known F4 issue:** `playback_service.py` currently issues `UPDATE play` in
+  its report and skip paths, but `music_app` has no UPDATE privilege on `play`.
+  The resulting database permission error means those operations are not
+  working. The fix must preserve the project rule that app writes to `play`
+  are append-only; do not solve it by granting unrestricted UPDATE.

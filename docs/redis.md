@@ -2,6 +2,17 @@
 
 This project uses Redis for ephemeral state and short-lived counters that must be fast, atomic, and easy to expire.
 
+## Current status
+
+The Tiago-side implementation is in place for the required Redis rules:
+
+- key builders in `redis/keys.py`
+- skip counter logic in `redis/skips.py`
+- single active device tracking in `redis/active_device.py`
+- compatibility wrappers in `redis/cache_service.py`
+
+The key patterns currently used by the app are consistent with the task brief: `skips:{listener_id}:{YYYYMMDDHH}` and `active_device:{listener_id}`.
+
 ## Key conventions
 
 All keys follow a single naming scheme so the team can reason about them and reuse the same pattern everywhere.

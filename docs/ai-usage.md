@@ -214,3 +214,21 @@
 **Outcome:** added aggregation pipelines for yearly listener summaries, artist streams by country and month, and top genres by country and month under `mongodb/pipelines/`. Updated `docs/mongodb.md` to follow the task's Question, Pipeline and Sample Output structure. Replaced references to `playback_events` and fields not present in the report collections with the actual exported collections and fields. Marked sample outputs as illustrative and explained that the rolling 12-month export can make a calendar-year summary partial.
 **Verification:** parsed all three pipeline JSON files and ran each pipeline against synthetic MongoDB collections, checking yearly totals, top tracks, top artists, top genre, peak day, artist stream totals and genre ranking. All assertions passed. The local export collections were empty, so the documentation examples are illustrative rather than outputs from the local database.
 **Mistakes caught:** Gemini's draft queried `playback_events` and used fields such as `seconds_played`, `started_at`, `artist_id` and `genre_name` that the derived report collections do not contain. It also reported listening hours and distinct listeners that those collections cannot calculate. The pipelines now use the collection shapes actually exported by `mongodb/export.py`.
+
+## Entry 22: Redis derived-data rebuild (Task 1.7)
+
+**Who:** Leandro.
+**Tool:** Copilot in VS Code.
+**For what:** implementing Task 1.7's Redis rebuild using Tiago's existing `redis/keys.py` helper without changing his implementation.
+**Outcome:** added `redis/rebuild.py` to rebuild global and per-country daily top-50 charts, today's per-track stream counters, and listeners' newest-first last-50 play lists from PostgreSQL. Documented the key patterns, expiration rules and Lisbon-day boundaries in `docs/redis.md`. The rebuild deletes only its own `charts:*`, `streams:*` and `last50:*` keys.
+**Verification:** Python compilation and `git diff --check` passed. A synthetic Redis test verified chart members/scores, country charts, stream counters, last-play ordering, expiration and the Lisbon DST boundary. The end-to-end rebuild completed against the local PostgreSQL/Redis setup; the local `play` table had no rows, so it rebuilt zero derived keys.
+**Mistakes caught:** the first synthetic check used mismatched indices when retrieving keys, so its assertions checked the wrong chart and stream-counter keys. Correcting the test's key references made the synthetic assertions pass; no application-code change was needed.
+
+## Entry 23: Redis derived-data verification (Task 1.8)
+
+**Who:** Leandro.
+**Tool:** Copilot in VS Code.
+**For what:** implementing a read-only comparison of Redis derived data against its PostgreSQL source, as required by Task 1.8.
+**Outcome:** added `redis/verify.py` to compare current and previous charts, today's per-track stream counters, and listeners' last-50 histories. The verifier reports missing, unexpected, incorrectly typed or mismatched keys and exits nonzero when differences exist. Documented how to run it in `docs/redis.md`.
+**Verification:** compilation and `git diff --check` passed. After rebuilding, the verifier exited `0` against the local PostgreSQL/Redis setup, where the `play` table is empty. A temporary unexpected Redis key made it report the mismatch and exit `1`, then the test removed that key. Synthetic comparisons also passed for charts, counters, ordered histories and a value mismatch.
+**Mistakes caught:** the first synthetic harness loaded a second copy of the rebuild module, so its SQL statement identity checks failed. Using the shared imported module fixed the harness; no application-code change was needed.

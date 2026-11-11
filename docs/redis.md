@@ -89,3 +89,12 @@ Charts contain at most 50 tracks, ordered by stream count with track ID as the
 tie-breaker. Daily stream counters are created only for tracks with one or more
 streams. Last-play lists include short plays, since they represent the last
 tracks played, not only qualifying streams.
+
+## Verify rebuilt data
+
+Run `uv run --project app python redis/verify.py` after the rebuild. The verifier
+reads PostgreSQL and Redis without modifying either, compares today's stream
+counters, today's and yesterday's charts, and every last-play history, and
+checks for missing or unexpected derived keys. It prints each difference and
+exits with status `1` on a mismatch; it exits with status `0` when the values
+match.

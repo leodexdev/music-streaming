@@ -159,3 +159,21 @@
 - The first version of the service locked the row with `FOR UPDATE` on a query that joins `subscription` and `plan`. That tries to lock both tables, and the app role only has `SELECT` on `plan`. The endpoint returned a 500, and `FOR UPDATE OF s` (lock only the subscription row, the same as the trigger does) fixed it.
 - The AI assumed the app role already had the grants the endpoint needs (`SELECT, UPDATE` on `subscription`, `SELECT, INSERT, UPDATE` on `subscription_member`, `SELECT` on `invite_code` and `plan`). They do not exist in `scripts/setup.sh` yet, so we created them by hand locally. TODO: Leo adds them to the grants.
 - The AI first assumed that the naive mode would show the race by itself. It would not, because the trigger already enforces the limit, so the test has to disable it.
+
+## Entry 17: database setup and seed pipeline (PR #7)
+
+**Who:** Leo.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** adding the data-seeding pipeline and resolving the read-only PostgreSQL role mismatch in PR #7.
+**Outcome:** added Faker to the app dependencies, changed the migration's read-only role references from `music_readonly` to `music_ro`, added `postgres/seed.py` for PostgreSQL fixture data, and added `scripts/seed.sh` to run the available PostgreSQL, MongoDB and Redis seed steps while safely skipping missing scripts.
+**Verification:** the PR description reports running `./scripts/run.sh reset -y` and `./scripts/run.sh seed`, then verifying the data in PostgreSQL.
+**Mistakes caught:** the migration referenced `music_readonly`, but the setup uses `music_ro`; the mismatch caused database setup to fail and was corrected in the PR.
+
+## Entry 18: MongoDB report export troubleshooting
+
+**Who:** Leandro.
+**Tool:** Copilot in VS Code.
+**For what:** diagnosing errors while running `uv run --project app python mongodb/export.py`, and checking the PostgreSQL roles, grants, MongoDB user setup and Git status.
+**Outcome:** aligned payment and payout statuses in `postgres/migrations/versions/0002_secondary_tables.py` and `postgres/seed.py` with the project brief. The export's `music_ro` role had no `SELECT` on `track_artist` and other tables queried by the export, so the migration grants `SELECT` on the required PostgreSQL tables; the grant was also applied to the local database. The MongoDB `music_app` user had not been created, so `./scripts/setup.sh mongo` was run. Converted PostgreSQL access in `mongodb/export.py` from direct psycopg calls to SQLAlchemy Core with bound parameters, and added country and device type to listener activity documents. Normalized line endings in `scripts/setup.sh` and `scripts/seed.sh`. Restored the five unrelated tracked files the user identified, leaving their migration, seed and export changes untouched.
+**Verification:** `./scripts/setup.sh postgres` applied migrations successfully. After the PostgreSQL grants and MongoDB user setup, `uv run --project app python mongodb/export.py` completed and reported that PostgreSQL and MongoDB both contained 0 streams in the export range. After the SQLAlchemy and activity-dimension changes, `py_compile`, a focused document-shape check and a full export run passed.
+**Mistakes caught:** checking only a few `music_ro` privileges did not establish that the role could run the export; the export also needs catalogue and relationship tables. Running only PostgreSQL setup did not create the MongoDB app user. The first SQLAlchemy rewrite closed the Mongo client before the final aggregate check; the end-to-end run caught this and the client close was moved after the check. An earlier Git status check incorrectly reported no tracked changes; a later check identified unrelated user changes, and only the specific files the user asked to restore were restored.

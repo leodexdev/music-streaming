@@ -53,12 +53,13 @@ def upgrade():
         sa.Column("month", sa.Date, nullable=False),
         sa.Column("amount", sa.Numeric(10, 2), nullable=False),
         sa.Column("paid_at", TS),
-        sa.Column("status", sa.Text, nullable=False, server_default="pending"),
+        sa.Column("status", sa.Text, nullable=False, server_default="approved"),
         sa.Column("provider_ref", sa.Text, unique=True),
         sa.CheckConstraint("EXTRACT(DAY FROM month) = 1", name="payment_month_ck"),
         sa.CheckConstraint("amount >= 0", name="payment_amount_ck"),
-        sa.CheckConstraint("status IN ('pending','paid','failed','refunded')", name="payment_status_ck"),
-        sa.CheckConstraint("status <> 'paid' OR paid_at IS NOT NULL", name="payment_paid_at_ck"),
+        sa.CheckConstraint("status IN ('approved','declined','refunded')", name="payment_status_ck"),
+        sa.CheckConstraint("status <> 'approved' OR paid_at IS NOT NULL", name="payment_approved_paid_at_ck"),
+        sa.CheckConstraint("status <> 'refunded' OR paid_at IS NOT NULL", name="payment_refunded_paid_at_ck"),
         sa.UniqueConstraint("subscription_id", "month", name="payment_subscription_month_uq"),
     )
     op.create_index("payment_subscription_month_idx", "payment", ["subscription_id", "month"])
@@ -70,12 +71,12 @@ def upgrade():
         sa.Column("rate_per_stream", sa.Numeric(10, 6), nullable=False),
         sa.Column("stream_count", sa.Integer, nullable=False, server_default="0"),
         sa.Column("amount", sa.Numeric(12, 2), nullable=False, server_default="0"),
-        sa.Column("status", sa.Text, nullable=False, server_default="pending"),
+        sa.Column("status", sa.Text, nullable=False, server_default="computed"),
         sa.CheckConstraint("EXTRACT(DAY FROM month) = 1", name="payout_month_ck"),
         sa.CheckConstraint("rate_per_stream >= 0", name="payout_rate_ck"),
         sa.CheckConstraint("stream_count >= 0", name="payout_stream_count_ck"),
         sa.CheckConstraint("amount >= 0", name="payout_amount_ck"),
-        sa.CheckConstraint("status IN ('pending','paid','failed')", name="payout_status_ck"),
+        sa.CheckConstraint("status IN ('computed','paid')", name="payout_status_ck"),
         sa.UniqueConstraint("artist_id", "month", name="payout_artist_month_uq"),
     )
 
@@ -116,7 +117,11 @@ def upgrade():
     # --- read-only role
     op.execute("""
         GRANT SELECT
-        ON genre, track_genre, track_like, artist_follow, payment, payout, play
+        ON label, artist, album, album_artist, track, track_artist,
+           listener, plan, subscription, subscription_member, invite_code,
+           play, playlist, playlist_collaborator, playlist_track,
+           genre, track_genre, track_like, artist_follow,
+           payment, payout
         TO music_ro;
     """)
 
@@ -159,7 +164,11 @@ def downgrade():
 
     op.execute("""
     REVOKE SELECT
-    ON genre, track_genre, track_like, artist_follow, payment, payout
+    ON label, artist, album, album_artist, track, track_artist,
+       listener, plan, subscription, subscription_member, invite_code,
+       play, playlist, playlist_collaborator, playlist_track,
+       genre, track_genre, track_like, artist_follow,
+       payment, payout
     FROM music_ro
     """)
 

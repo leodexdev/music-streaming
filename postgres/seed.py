@@ -153,10 +153,10 @@ def seed():
                 pay_month = start_date.replace(day=1)
                 conn.execute(text("""
                     INSERT INTO payment (subscription_id, month, amount, paid_at, status, provider_ref)
-                    VALUES (:sub, :month, :amount, :paid, 'paid', :ref)
+                    VALUES (:sub, :month, :amount, :paid, 'approved', :ref)
                 """), {
-                    "sub": sub_id, 
-                    "month": pay_month, 
+                    "sub": sub_id,
+                    "month": pay_month,
                     "amount": plan.monthly_price,
                     "paid": datetime.now(timezone.utc),
                     "ref": f"stripe_{fake.unique.hexify(text='^^^^^^^^')}"
@@ -207,7 +207,7 @@ def seed():
             payout_month = date.today().replace(day=1)
             conn.execute(text("""
                 INSERT INTO payout (artist_id, month, rate_per_stream, stream_count, amount, status)
-                VALUES (:art, :month, 0.004, 10000, 40.00, 'pending')
+                VALUES (:art, :month, 0.004, 10000, 40.00, 'computed')
             """), {"art": artist_id, "month": payout_month})
 
     print("Seed complete! 🌱")

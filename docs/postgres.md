@@ -155,7 +155,28 @@ Execution plans and memory buffer metrics collected against the seeded database 
 
 ---
 
-## 6. Database Roles & Security Model
+## 6. Tiago Implementation Status and Validation Notes
+
+The Tiago-side relational work is implemented around the core invariants of the platform:
+
+- `0001_primary_tables.py` defines the relational schema, the partial unique indexes, the `subscription_member_limit` trigger, and the playlist denormalisation triggers.
+- `0003_indexes.py` adds the query-specific index strategy for listener history, track stream history, and trigram matching on track titles.
+- `app/src/app/services/subscription_service.py` and `app/src/app/services/playlist_service.py` enforce the business rules in transaction-safe code using `SELECT ... FOR UPDATE` when required.
+- `app/src/app/services/playback_service.py` keeps the playback rules aligned with the Redis device/skip guard and records the playback events as required by the Mongo task.
+
+### Validated concurrency check
+
+The collaborative playlist scenario was executed in real mode with the project script and passed:
+
+```text
+Requests: 50 | accepted: 10 | refused: 40 | 5xx/errors: 0
+Tracks in PostgreSQL: 500 (limit 500) | distinct positions: 500 | min: 1 | max: 500 | track_count: 500
+Positions are exactly 1..500 with no duplicates: True -> rule HOLDS
+```
+
+This result confirms the playlist logic is holding the invariant under concurrent inserts while preserving the 500-track maximum and the no-gap/no-duplicate ordering rule.
+
+## 7. Database Roles & Security Model
 
 The database strictly enforces the principle of least privilege using three distinct roles created in `scripts/setup.sh`:
 

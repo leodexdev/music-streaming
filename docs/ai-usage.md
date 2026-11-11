@@ -20,8 +20,8 @@
 
 **Who:** Tiago.
 **Tool:** Gemini (2.5 Flash), gemini.google.com.
-**For what:** creating the team task distribution and time budget document (`docs/task-distribution.md`), defining core responsibilities, estimated durations, priorities, and directory mapping for all 3 group members (Tiago, Leandro, and Paulo).
-**Outcome:** The initial AI proposal allocated equal technical weights across engines without considering member expertise or Git verification risks. I requested a refined 15-hour budget per member (~12 hours coding, 3 hours buffer/research) where Leandro acts as repo owner (Docker/infrastructure), I handle core database architecture and Python concurrency control, and Paulo handles auxiliary features. I also rejected Lua script proposals, enforcing pure Python, SQL, and FastAPI libraries (`redis-py`, SQLAlchemy transaction locks). I kept the final markdown table structure and the automated bash verification script.
+**For what:** creating the team task distribution and time budget document (`docs/task-distribution.md`), defining core responsibilities, estimated durations, priorities, and directory mapping for all 3 group members (Tiago, Leo, and Paulo).
+**Outcome:** The initial AI proposal allocated equal technical weights across engines without considering member expertise or Git verification risks. I requested a refined 15-hour budget per member (~12 hours coding, 3 hours buffer/research) where Leo acts as repo owner (Docker/infrastructure), I handle core database architecture and Python concurrency control, and Paulo handles auxiliary features. I also rejected Lua script proposals, enforcing pure Python, SQL, and FastAPI libraries (`redis-py`, SQLAlchemy transaction locks). I kept the final markdown table structure and the automated bash verification script.
 **Verification:** cross-referenced task paths against the four mandatory Git areas (`postgres/`, `mongodb/`, `redis/`, `app/`) to ensure no member receives a 0-commit penalty.
 **Mistakes caught:** the AI's early versions assigned Lua scripts (contrary to our stack decisions) and initially forgot to distribute tasks across all 4 mandatory engine directories for every member. I corrected it to guarantee cross-directory compliance for everyone.
 
@@ -199,7 +199,7 @@
 
 ## Entry 20: MongoDB report export troubleshooting
 
-**Who:** Leandro.
+**Who:** Leo.
 **Tool:** Copilot in VS Code.
 **For what:** diagnosing errors while running `uv run --project app python mongodb/export.py`, and checking the PostgreSQL roles, grants, MongoDB user setup and Git status.
 **Outcome:** aligned payment and payout statuses in `postgres/migrations/versions/0002_secondary_tables.py` and `postgres/seed.py` with the project brief. The export's `music_ro` role had no `SELECT` on `track_artist` and other tables queried by the export, so the migration grants `SELECT` on the required PostgreSQL tables; the grant was also applied to the local database. The MongoDB `music_app` user had not been created, so `./scripts/setup.sh mongo` was run. Converted PostgreSQL access in `mongodb/export.py` from direct psycopg calls to SQLAlchemy Core with bound parameters, and added country and device type to listener activity documents. Normalized line endings in `scripts/setup.sh` and `scripts/seed.sh`. Restored the five unrelated tracked files the user identified, leaving their migration, seed and export changes untouched.
@@ -208,7 +208,7 @@
 
 ## Entry 21: MongoDB report pipelines (Task 1.6)
 
-**Who:** Leandro.
+**Who:** Leo.
 **Tool:** Copilot in VS Code.
 **For what:** reviewing Gemini's draft for the three MongoDB report pipelines and completing Task 1.6 using the actual collections produced by `mongodb/export.py`.
 **Outcome:** added aggregation pipelines for yearly listener summaries, artist streams by country and month, and top genres by country and month under `mongodb/pipelines/`. Updated `docs/mongodb.md` to follow the task's Question, Pipeline and Sample Output structure. Replaced references to `playback_events` and fields not present in the report collections with the actual exported collections and fields. Marked sample outputs as illustrative and explained that the rolling 12-month export can make a calendar-year summary partial.
@@ -217,7 +217,7 @@
 
 ## Entry 22: Redis derived-data rebuild (Task 1.7)
 
-**Who:** Leandro.
+**Who:** Leo.
 **Tool:** Copilot in VS Code.
 **For what:** implementing Task 1.7's Redis rebuild using Tiago's existing `redis/keys.py` helper without changing his implementation.
 **Outcome:** added `redis/rebuild.py` to rebuild global and per-country daily top-50 charts, today's per-track stream counters, and listeners' newest-first last-50 play lists from PostgreSQL. Documented the key patterns, expiration rules and Lisbon-day boundaries in `docs/redis.md`. The rebuild deletes only its own `charts:*`, `streams:*` and `last50:*` keys.
@@ -226,7 +226,7 @@
 
 ## Entry 23: Redis derived-data verification (Task 1.8)
 
-**Who:** Leandro.
+**Who:** Leo.
 **Tool:** Copilot in VS Code.
 **For what:** implementing a read-only comparison of Redis derived data against its PostgreSQL source, as required by Task 1.8.
 **Outcome:** added `redis/verify.py` to compare current and previous charts, today's per-track stream counters, and listeners' last-50 histories. The verifier reports missing, unexpected, incorrectly typed or mismatched keys and exits nonzero when differences exist. Documented how to run it in `docs/redis.md`.
@@ -235,7 +235,7 @@
 
 ## Entry 24: MongoDB setup script integration
 
-**Who:** Leandro.
+**Who:** Leo.
 **Tool:** Copilot in VS Code.
 **For what:** fixing `scripts/setup.sh` to run the existing Python MongoDB collection setup instead of the nonexistent `mongodb/setup.js`.
 **Outcome:** setup now requires `MONGO_ROOT_URL`, invokes `mongodb/setup_collections.py` through `uv`, and reports setup failures. The existing MongoDB app-user creation remains unchanged.
@@ -244,9 +244,18 @@
 
 ## Entry 25: deterministic full-size seed pipeline (Task 1.9)
 
-**Who:** Leandro.
+**Who:** Leo.
 **Tool:** Copilot in VS Code.
 **For what:** implementing the brief's repeatable PostgreSQL and MongoDB fixtures and chaining the report export and Redis rebuild.
 **Outcome:** replaced the small PostgreSQL sample with seeded Faker content and deterministic, streaming `COPY` loads for the required catalogue, listeners, subscriptions/payments, plays, playlists and relationships. Subscription memberships use batched inserts so the database capacity trigger runs for every row. Added 50,000 idempotently upserted MongoDB playback events within the last 30 days. `scripts/seed.sh` now confirms before truncating PostgreSQL by default, supports `--yes`, and stops if a pipeline step fails.
 **Verification:** Python compilation and shell syntax checks passed. In-memory checks confirmed required row counts, full plan memberships, 1,094,000 playlist entries, 500,000 unique likes and follows each, 25% short plays, and at least 1,125 qualifying plays for each of the 200 hot tracks. A temporary PostgreSQL table confirmed that `COPY` fires statement triggers with transition rows, preserving playlist counts. The MongoDB seeder ran twice locally and retained exactly 50,000 recent events, confirming idempotency. The destructive full-size PostgreSQL load was not run against the shared local database.
 **Mistakes caught:** generator review found that the first hot-track distribution aligned short-play selection with track IDs, which would have left fewer than 200 tracks with 1,000 streams. The short-play schedule was changed to rotate by play cycle so each hot track gets enough qualifying streams.
+
+## Entry 26: catalogue, charts, payouts and report APIs (Task 1.10)
+
+**Who:** Leo.
+**Tool:** Copilot in VS Code.
+**For what:** implementing the assigned F1, F6, F7 and F8 API flows without replacing Tiago's existing routes.
+**Outcome:** added catalogue search/details, Redis-only chart and listener-history reads, monthly payout closing with Lisbon boundaries and half-up rounding, and report reads from the exported MongoDB collections. Added migration `0005_application_core_grants.py` after safe API checks found the `music_app` role could not read core catalogue tables. Documented endpoint behavior in the PostgreSQL, Redis and MongoDB guides.
+**Verification:** four focused unit tests cover payout split rounding, duplicate-close rollback, and yearly report aggregation. Compilation and whitespace checks passed. Migration `0005` was applied; the app health check passed; live catalogue, chart, and report GETs returned HTTP 200; the payout aggregation SELECT succeeded as `music_app` without closing a month. Redis `MONITOR` showed the expected sorted-set/list reads, with no PostgreSQL statements during F6 requests.
+**Mistakes caught:** the existing local `music_app` role lacked SELECT on core tables, which the new catalogue and payout routes require; the new migration grants those privileges without changing Tiago's schema or playback code.

@@ -98,3 +98,22 @@ counters, today's and yesterday's charts, and every last-play history, and
 checks for missing or unexpected derived keys. It prints each difference and
 exits with status `1` on a mismatch; it exits with status `0` when the values
 match.
+
+## F6 chart API reads
+
+- `GET /charts` reads today's global sorted set.
+- `GET /charts?country=PT` reads today's chart for that country.
+- `GET /charts/last50/{listener_id}` reads that listener's newest-first list.
+
+These handlers use only Redis; they do not call PostgreSQL. To confirm this
+locally, start `redis-cli MONITOR`, issue the chart requests, and observe
+`ZREVRANGE`/`LRANGE`. At the same time, inspect PostgreSQL logs (the compose
+service has `log_statement=all`) and confirm the requests generated no SQL.
+Do not include `/health` in this check because the health endpoint intentionally
+queries all three stores.
+
+Verification: while authenticated `MONITOR` was active, `GET /charts`,
+`GET /charts?country=PT`, and `GET /charts/last50/1` produced the expected
+`ZREVRANGE charts:20261111:global`, `ZREVRANGE charts:20261111:country:PT`,
+and `LRANGE last50:1` commands. All three requests returned HTTP 200. No
+PostgreSQL statements appeared in the corresponding log interval.

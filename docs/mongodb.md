@@ -56,6 +56,24 @@ This should be measured with `explain("executionStats")` before and after the in
 ## Role in the architecture
 
 MongoDB is used for event streams and read-optimized derived collections, while PostgreSQL remains the transactional source of truth for all business rules and invariants.
+
+## F8 report API
+
+The API reads the report collections directly; these requests do not query
+PostgreSQL:
+
+- `GET /reports/listeners/{listener_id}/yearly-summary/{year}` combines that
+  listener's monthly documents into yearly totals, top tracks and artists,
+  top genre, and peak listening day.
+- `GET /reports/artists/{artist_id}/streams?country=PT&month=2026-10` reads
+  the artist's country/month stream rows. Country and month filters are optional.
+- `GET /reports/genres/top?country=PT&month=2026-10` returns the top five
+  genres for that country and month.
+
+The yearly endpoint uses `listener_month_stats`; the artist and genre endpoints
+use `artist_country_month` and `genre_country_month`, respectively. Run
+`uv run --project app python mongodb/export.py` after seeding PostgreSQL to
+refresh these collections.
 # MongoDB Aggregation Pipelines
 
 `mongodb/export.py` reads PostgreSQL plays from the last 12 calendar months and

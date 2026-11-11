@@ -56,3 +56,132 @@ This should be measured with `explain("executionStats")` before and after the in
 ## Role in the architecture
 
 MongoDB is used for event streams and read-optimized derived collections, while PostgreSQL remains the transactional source of truth for all business rules and invariants.
+# MongoDB Aggregation Pipelines
+
+`mongodb/export.py` reads PostgreSQL plays from the last 12 calendar months and
+rebuilds the derived report collections. Month and day buckets use
+`Europe/Lisbon`; a stream is a play with at least 30 seconds played. The
+examples below are illustrative and are not output from the currently empty
+local seed.
+
+The pipelines operate on the export collections, not on `playback_events`.
+`listener_month_stats` contains one document per listener and month, with
+monthly totals, track details and daily activity. Each daily activity item
+contains `day`, `country`, `device_type`, `plays`, `streams` and `seconds`.
+`artist_country_month` contains artist, country, month and stream totals.
+`genre_country_month` contains genre, country, month and stream totals.
+
+Run a pipeline by passing its JSON array to `aggregate()` on the collection
+listed below. The complete pipeline arrays are saved in the linked JSON files.
+
+## 1. Yearly Listener Summary ("Your Year in Music")
+
+### Question
+
+For each listener and year represented in the export, what were their minutes
+listened, top five tracks, top five artists, top genre, and day with the most
+listening time?
+
+### Pipeline
+
+[`mongodb/pipelines/yearly_listener_summary.json`](../mongodb/pipelines/yearly_listener_summary.json)
+is the complete aggregation array for `listener_month_stats`. It derives the
+year from the Lisbon-local `month`, then uses `$facet` to calculate yearly
+totals, rank tracks and artists by streams, rank genres by streams, and find
+the day with the most listening seconds. Artist IDs and names are paired from
+the parallel arrays exported for each track. Ties are resolved by stable
+IDs/names or day to make results deterministic.
+
+The rolling export only includes the last 12 calendar months, so a calendar
+year in this report may be partial if all of its months are not present in the
+export.
+
+### Sample Output
+
+```json
+{
+  "listener_id": 42,
+  "year": 2026,
+  "plays": 210,
+  "streams": 178,
+  "total_minutes": 735.5,
+  "top_tracks": [
+    {
+      "track_id": 1001,
+      "title": "Night Walk",
+      "streams": 20,
+      "seconds": 3600
+    }
+  ],
+  "top_artists": [
+    {
+      "artist_id": 9,
+      "artist": "Mira",
+      "streams": 44
+    }
+  ],
+  "top_genre": "Electronic",
+  "peak_day": "2026-08-14",
+  "peak_day_seconds": 7200
+}
+```
+
+## 2. Artist Streams by Country and Month
+
+### Question
+
+How many streams did each artist receive in each country and month?
+
+### Pipeline
+
+[`mongodb/pipelines/artist_streams_by_country_month.json`](../mongodb/pipelines/artist_streams_by_country_month.json)
+is the complete aggregation array for `artist_country_month`. It groups the
+exported artist-country-month rows, sums their stream counts, and orders the
+result by month, country and stream count. The export counts a stream for each
+main artist on a track.
+
+### Sample Output
+
+```json
+{
+  "artist_id": 9,
+  "artist_name": "Mira",
+  "country": "PT",
+  "month": "2026-10",
+  "stream_count": 482
+}
+```
+
+## 3. Top Genres by Country and Month
+
+### Question
+
+Which five genres had the most streams in each country and month?
+
+### Pipeline
+
+[`mongodb/pipelines/top_genres_by_country_month.json`](../mongodb/pipelines/top_genres_by_country_month.json)
+is the complete aggregation array for `genre_country_month`. It groups
+exported genre-country-month rows, sorts genres by stream count (with genre
+name as a tie-breaker), and returns the top five for each country and month.
+The exported collection has no listener IDs, so it cannot produce a distinct
+listener count.
+
+### Sample Output
+
+```json
+{
+  "country": "PT",
+  "month": "2026-10",
+  "top_genres": [
+    {
+      "genre": "Pop",
+      "stream_count": 1250
+    },
+    {
+      "genre": "Electronic",
+      "stream_count": 980
+    }
+  ]
+}
+```

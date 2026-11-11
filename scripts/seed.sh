@@ -60,6 +60,19 @@ seed_mongo() {
   fi
 }
 
+export_reports() {
+  echo "==> MongoDB report export"
+  if [ ! -f mongodb/export.py ]; then
+    skip "mongodb/export.py not found"
+    return
+  fi
+  if uv run --project app python mongodb/export.py; then
+    ok "report collections exported"
+  else
+    fail "mongodb/export.py (see error above)"
+  fi
+}
+
 # --------------------------------------------------------------------- Redis
 seed_redis() {
   echo "==> Redis"
@@ -77,14 +90,15 @@ seed_redis() {
 
 # ---------------------------------------------------------------------- main
 TARGETS=("$@")
-[ "${#TARGETS[@]}" -gt 0 ] || TARGETS=(postgres mongo redis)
+[ "${#TARGETS[@]}" -gt 0 ] || TARGETS=(postgres mongo export redis)
 
 for t in "${TARGETS[@]}"; do
   case "$t" in
     postgres) seed_postgres ;;
     mongo)    seed_mongo ;;
+    export)   export_reports ;;
     redis)    seed_redis ;;
-    *) echo "Unknown target: $t (use postgres, mongo or redis)" >&2; exit 1 ;;
+    *) echo "Unknown target: $t (use postgres, mongo, export or redis)" >&2; exit 1 ;;
   esac
 done
 

@@ -187,3 +187,30 @@
 - `other heartbeat: False`
 - `key sample: skips:777:2026111116`
 **Mistakes caught:** the main issue was the directory name collision between the project folder `redis/` and the installed `redis` Python package; imports like `from redis.keys import ...` failed because Python resolved the package name instead of the project-local module. We fixed this by importing project-local files by path in the test runner and by changing the module imports to `from keys import ...`, `from skips import ...`, and `from active_device import ...` inside the Redis task files. We also had to separate the “usage of AI” notes from the actual implementation: the AI suggestions were used for the structure and logic, but the final code and verification were checked in the project environment before being accepted.
+
+## Entry 19: database setup and seed pipeline (PR #7)
+
+**Who:** Leo.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** adding the data-seeding pipeline and resolving the read-only PostgreSQL role mismatch in PR #7.
+**Outcome:** added Faker to the app dependencies, changed the migration's read-only role references from `music_readonly` to `music_ro`, added `postgres/seed.py` for PostgreSQL fixture data, and added `scripts/seed.sh` to run the available PostgreSQL, MongoDB and Redis seed steps while safely skipping missing scripts.
+**Verification:** the PR description reports running `./scripts/run.sh reset -y` and `./scripts/run.sh seed`, then verifying the data in PostgreSQL.
+**Mistakes caught:** the migration referenced `music_readonly`, but the setup uses `music_ro`; the mismatch caused database setup to fail and was corrected in the PR.
+
+## Entry 20: MongoDB report export troubleshooting
+
+**Who:** Leandro.
+**Tool:** Copilot in VS Code.
+**For what:** diagnosing errors while running `uv run --project app python mongodb/export.py`, and checking the PostgreSQL roles, grants, MongoDB user setup and Git status.
+**Outcome:** aligned payment and payout statuses in `postgres/migrations/versions/0002_secondary_tables.py` and `postgres/seed.py` with the project brief. The export's `music_ro` role had no `SELECT` on `track_artist` and other tables queried by the export, so the migration grants `SELECT` on the required PostgreSQL tables; the grant was also applied to the local database. The MongoDB `music_app` user had not been created, so `./scripts/setup.sh mongo` was run. Converted PostgreSQL access in `mongodb/export.py` from direct psycopg calls to SQLAlchemy Core with bound parameters, and added country and device type to listener activity documents. Normalized line endings in `scripts/setup.sh` and `scripts/seed.sh`. Restored the five unrelated tracked files the user identified, leaving their migration, seed and export changes untouched.
+**Verification:** `./scripts/setup.sh postgres` applied migrations successfully. After the PostgreSQL grants and MongoDB user setup, `uv run --project app python mongodb/export.py` completed and reported that PostgreSQL and MongoDB both contained 0 streams in the export range. After the SQLAlchemy and activity-dimension changes, `py_compile`, a focused document-shape check and a full export run passed.
+**Mistakes caught:** checking only a few `music_ro` privileges did not establish that the role could run the export; the export also needs catalogue and relationship tables. Running only PostgreSQL setup did not create the MongoDB app user. The first SQLAlchemy rewrite closed the Mongo client before the final aggregate check; the end-to-end run caught this and the client close was moved after the check. An earlier Git status check incorrectly reported no tracked changes; a later check identified unrelated user changes, and only the specific files the user asked to restore were restored.
+
+## Entry 21: MongoDB report pipelines (Task 1.6)
+
+**Who:** Leandro.
+**Tool:** Copilot in VS Code.
+**For what:** reviewing Gemini's draft for the three MongoDB report pipelines and completing Task 1.6 using the actual collections produced by `mongodb/export.py`.
+**Outcome:** added aggregation pipelines for yearly listener summaries, artist streams by country and month, and top genres by country and month under `mongodb/pipelines/`. Updated `docs/mongodb.md` to follow the task's Question, Pipeline and Sample Output structure. Replaced references to `playback_events` and fields not present in the report collections with the actual exported collections and fields. Marked sample outputs as illustrative and explained that the rolling 12-month export can make a calendar-year summary partial.
+**Verification:** parsed all three pipeline JSON files and ran each pipeline against synthetic MongoDB collections, checking yearly totals, top tracks, top artists, top genre, peak day, artist stream totals and genre ranking. All assertions passed. The local export collections were empty, so the documentation examples are illustrative rather than outputs from the local database.
+**Mistakes caught:** Gemini's draft queried `playback_events` and used fields such as `seconds_played`, `started_at`, `artist_id` and `genre_name` that the derived report collections do not contain. It also reported listening hours and distinct listeners that those collections cannot calculate. The pipelines now use the collection shapes actually exported by `mongodb/export.py`.

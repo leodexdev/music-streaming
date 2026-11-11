@@ -13,6 +13,19 @@ The Tiago-side implementation is in place for the required Redis rules:
 
 The key patterns currently used by the app are consistent with the task brief: `skips:{listener_id}:{YYYYMMDDHH}` and `active_device:{listener_id}`.
 
+## Persistence and memory
+
+Compose starts Redis with `--requirepass`, `--appendonly yes`, and the named
+volume `redis_data:/data`, so AOF data survives a normal container restart.
+No explicit `maxmemory` or eviction policy is configured; Redis uses its
+default behavior and can consume memory up to the container/host limit.
+
+Redis is not the authoritative store for catalogue, play, or payout data.
+Charts, daily stream counters, and last-50 lists are derived and can be
+recreated from PostgreSQL with `redis/rebuild.py`. Active-device keys and
+skip counters are ephemeral and are not backed up for recovery. See the
+[recovery runbook](runbook.md).
+
 ## Key conventions
 
 All keys follow a single naming scheme so the team can reason about them and reuse the same pattern everywhere.
@@ -89,6 +102,9 @@ Charts contain at most 50 tracks, ordered by stream count with track ID as the
 tie-breaker. Daily stream counters are created only for tracks with one or more
 streams. Last-play lists include short plays, since they represent the last
 tracks played, not only qualifying streams.
+
+The current rebuild is manual: the playback API does not increment these
+derived chart keys on every play. A rebuild is required to refresh them.
 
 ## Verify rebuilt data
 

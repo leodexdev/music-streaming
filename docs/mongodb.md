@@ -17,6 +17,25 @@ Required fields:
 - `position_seconds`: integer/long, minimum 0
 - `ts`: date
 
+Example:
+
+```json
+{
+  "listener_id": 777,
+  "device_id": "phone-1",
+  "device_type": "mobile",
+  "track_id": 1204,
+  "event_type": "heartbeat",
+  "position_seconds": 30,
+  "ts": "2026-11-11T20:30:00Z"
+}
+```
+
+Listener and track IDs are references to PostgreSQL entities; their complete
+records are not embedded because they are stable relational data and can
+change independently of an event. Events are append-only, and their retention
+is bounded by the TTL index.
+
 ## Indexes
 
 1. TTL on `ts` with `expireAfterSeconds: 2592000`
@@ -35,6 +54,44 @@ The project also defines a `track_details` collection as the place for variable 
 - blocked countries
 
 This collection keeps one document per `track_id` using a unique index on `track_id`.
+`track_id` references PostgreSQL; the variable fields are embedded in the
+document because they are read together. Example:
+
+```json
+{
+  "track_id": 1204,
+  "lyrics": "...",
+  "language": "en",
+  "bpm": 120,
+  "key": "C major",
+  "credits": [{"role": "producer", "name": "Example"}],
+  "blocked_countries": ["XX"]
+}
+```
+
+This collection is a place for optional metadata; the current API does not
+read or write it.
+
+## Derived report collections
+
+`mongodb/export.py` rebuilds three collections from PostgreSQL:
+
+- `listener_month_stats`: one document per listener and Lisbon-local month,
+  embedding monthly totals, tracks, and daily activity so a yearly report can
+  read a small number of documents.
+- `artist_country_month`: one document per artist, country, and month, with
+  the artist ID/name and stream count needed by the artist report.
+- `genre_country_month`: one document per genre, country, and month, with its
+  stream count.
+
+These are derived read models, not the source of truth. They are regenerated
+from PostgreSQL after seeding or when report data must be refreshed. The event
+and report data reference relational entities by ID rather than embedding
+mutable listener/catalogue records.
+
+**Validation status:** `mongodb/setup_collections.py` creates strict validators
+for `playback_events` and `track_details`. The current export does not install
+validators for the three report collections; this remains a setup gap.
 
 ## Setup command
 
@@ -51,7 +108,17 @@ Example query:
 db.playback_events.find({ listener_id: 777 }).sort({ ts: -1 }).limit(20)
 ```
 
-This should be measured with `explain("executionStats")` before and after the index is created. The index matters because the app usually reads playback events by listener and time window.
+Measured on the local seeded event collection (the sample listener had two
+events):
+
+| Plan | Winning stages | Returned | Documents examined | Keys examined |
+|---|---|---:|---:|---:|
+| Collection scan, forced with `hint({$natural: 1})` | `COLLSCAN` + `SORT` | 2 | 49,910 | 0 |
+| `listener_events_idx` | `IXSCAN` + `FETCH` + `LIMIT` | 2 | 2 | 2 |
+
+The indexed plan examined only the matching listener's two documents and
+avoided the in-memory sort. Elapsed times were 8 ms without the index and
+under 1 ms with it in this local run; timings vary by machine and cache state.
 
 ## Role in the architecture
 

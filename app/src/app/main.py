@@ -3,10 +3,13 @@ from sqlalchemy import text
 from app.routers import subscriptions
 
 from app.database import engine, mongo_client, redis_client
+from app.routers import playlists
 
 app = FastAPI(title="Music Streaming")
 
 app.include_router(subscriptions.router)
+
+app.include_router(playlists.router)
 
 @app.get("/health")
 def health() -> dict[str, str]:

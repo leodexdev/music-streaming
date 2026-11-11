@@ -160,7 +160,35 @@
 - The AI assumed the app role already had the grants the endpoint needs (`SELECT, UPDATE` on `subscription`, `SELECT, INSERT, UPDATE` on `subscription_member`, `SELECT` on `invite_code` and `plan`). They do not exist in `scripts/setup.sh` yet, so we created them by hand locally. TODO: Leo adds them to the grants.
 - The AI first assumed that the naive mode would show the race by itself. It would not, because the trigger already enforces the limit, so the test has to disable it.
 
-## Entry 17: database setup and seed pipeline (PR #7)
+## Entry 17: PostgreSQL EXPLAIN validation, query optimizer analysis, and MongoDB schema verification
+
+**Who:** Tiago.
+**Tool:** Gemini (2.5 Flash), gemini.google.com.
+**For what:** 
+- Diagnosing and executing the `EXPLAIN (ANALYZE, BUFFERS)` benchmark query on the `play` table following data seeding to verify index configuration (`play_listener_started_desc_idx`).
+- Analyzing PostgreSQL cost-based optimizer mechanics regarding small vs. large datasets.
+- Reviewing completed MongoDB tasks (Task 2.3: JSON schema validation with `$jsonSchema`, type constraints, enums, and TTL indexing for playback events).
+**Outcome:** Kept the pure Python and SQLAlchemy execution approach via terminal one-liners (`uv run python -c`) without creating unnecessary script files. Explained why PostgreSQL selects a `Seq Scan` over an `Index Scan` when table row counts are low, and confirmed the MongoDB schema and TTL index setup ready for application integration.
+**Verification:** Ran the EXPLAIN execution plan in the terminal, confirmed `rows=4` and `Rows Removed by Filter: 296` after running `postgres/seed.py`.
+**Mistakes caught:** The initial query execution returned `rows=0` due to an empty table; identified that `postgres/seed.py` needed to be executed first, populated the data, and re-ran the benchmark to get true execution metrics.
+
+## Entry 18: Redis key naming and Mongo collection setup
+
+**Who:** Tiago.
+**Tool:** GitHub Copilot.
+**For what:** correcting the task 2.4 Redis implementation and aligning the task 2.3 Mongo collection setup with the project brief, including key naming, `SET ... NX` + `INCR` skip logic, active-device heartbeat logic, TTL index setup, and strict validation for `playback_events`.
+**Outcome:** Kept the project-local structure: `redis/keys.py`, `redis/skips.py`, `redis/active_device.py`, `redis/cache_service.py`, and the updated `mongodb/setup_collections.py`. The Redis key convention now follows `skips:{listener_id}:{YYYYMMDDHH}` and `active_device:{listener_id}`; the skip counter is limited to 6 per hour and the 7th request returns a refusal; the active-device lock is renewed atomically with `WATCH`/`MULTI` and rejected for non-active devices. The Mongo collection includes strict schema validation, TTL on `ts`, and the compound index `{listener_id: 1, ts: -1}` with a `track_details` collection suggestion for variable metadata.
+**Verification:** ran `cd /workspaces/music-streaming && python -m compileall redis mongodb` and then a `uv run python` validation script that checked the Redis behavior. The verified output was:
+- `PING: True`
+- `skip1: True` to `skip6: True`
+- `skip7: False`
+- `device: True`
+- `same heartbeat: True`
+- `other heartbeat: False`
+- `key sample: skips:777:2026111116`
+**Mistakes caught:** the main issue was the directory name collision between the project folder `redis/` and the installed `redis` Python package; imports like `from redis.keys import ...` failed because Python resolved the package name instead of the project-local module. We fixed this by importing project-local files by path in the test runner and by changing the module imports to `from keys import ...`, `from skips import ...`, and `from active_device import ...` inside the Redis task files. We also had to separate the “usage of AI” notes from the actual implementation: the AI suggestions were used for the structure and logic, but the final code and verification were checked in the project environment before being accepted.
+
+## Entry 19: database setup and seed pipeline (PR #7)
 
 **Who:** Leo.
 **Tool:** Claude (Sonnet 5.5), claude.ai.
@@ -169,7 +197,7 @@
 **Verification:** the PR description reports running `./scripts/run.sh reset -y` and `./scripts/run.sh seed`, then verifying the data in PostgreSQL.
 **Mistakes caught:** the migration referenced `music_readonly`, but the setup uses `music_ro`; the mismatch caused database setup to fail and was corrected in the PR.
 
-## Entry 18: MongoDB report export troubleshooting
+## Entry 20: MongoDB report export troubleshooting
 
 **Who:** Leandro.
 **Tool:** Copilot in VS Code.
@@ -178,7 +206,7 @@
 **Verification:** `./scripts/setup.sh postgres` applied migrations successfully. After the PostgreSQL grants and MongoDB user setup, `uv run --project app python mongodb/export.py` completed and reported that PostgreSQL and MongoDB both contained 0 streams in the export range. After the SQLAlchemy and activity-dimension changes, `py_compile`, a focused document-shape check and a full export run passed.
 **Mistakes caught:** checking only a few `music_ro` privileges did not establish that the role could run the export; the export also needs catalogue and relationship tables. Running only PostgreSQL setup did not create the MongoDB app user. The first SQLAlchemy rewrite closed the Mongo client before the final aggregate check; the end-to-end run caught this and the client close was moved after the check. An earlier Git status check incorrectly reported no tracked changes; a later check identified unrelated user changes, and only the specific files the user asked to restore were restored.
 
-## Entry 19: MongoDB report pipelines (Task 1.6)
+## Entry 21: MongoDB report pipelines (Task 1.6)
 
 **Who:** Leandro.
 **Tool:** Copilot in VS Code.

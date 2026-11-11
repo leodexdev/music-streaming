@@ -1,0 +1,33 @@
+[
+  {
+    "$group": {
+      "_id": {
+        "artist_id": "$artist_id",
+        "artist_name": "$artist_name",
+        "country": "$country",
+        "month": "$month"
+      },
+      "streams": {
+        "$sum": "$streams"
+      }
+    }
+  },
+  {
+    "$project": {
+      "_id": 0,
+      "artist_id": "$_id.artist_id",
+      "artist_name": "$_id.artist_name",
+      "country": "$_id.country",
+      "month": "$_id.month",
+      "stream_count": "$streams"
+    }
+  },
+  {
+    "$sort": {
+      "month": -1,
+      "country": 1,
+      "stream_count": -1,
+      "artist_id": 1
+    }
+  }
+]

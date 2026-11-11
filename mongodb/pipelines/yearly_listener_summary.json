@@ -1,0 +1,445 @@
+[
+  {
+    "$set": {
+      "year": {
+        "$toInt": {
+          "$substrBytes": ["$month", 0, 4]
+        }
+      }
+    }
+  },
+  {
+    "$facet": {
+      "totals": [
+        {
+          "$group": {
+            "_id": {
+              "listener_id": "$listener_id",
+              "year": "$year"
+            },
+            "plays": {
+              "$sum": "$plays"
+            },
+            "streams": {
+              "$sum": "$streams"
+            },
+            "seconds": {
+              "$sum": "$seconds"
+            }
+          }
+        }
+      ],
+      "tracks": [
+        {
+          "$unwind": "$tracks"
+        },
+        {
+          "$group": {
+            "_id": {
+              "listener_id": "$listener_id",
+              "year": "$year",
+              "track_id": "$tracks.track_id",
+              "title": "$tracks.title"
+            },
+            "streams": {
+              "$sum": "$tracks.streams"
+            },
+            "seconds": {
+              "$sum": "$tracks.seconds"
+            }
+          }
+        },
+        {
+          "$sort": {
+            "_id.listener_id": 1,
+            "_id.year": 1,
+            "streams": -1,
+            "seconds": -1,
+            "_id.track_id": 1
+          }
+        },
+        {
+          "$group": {
+            "_id": {
+              "listener_id": "$_id.listener_id",
+              "year": "$_id.year"
+            },
+            "items": {
+              "$push": {
+                "track_id": "$_id.track_id",
+                "title": "$_id.title",
+                "streams": "$streams",
+                "seconds": "$seconds"
+              }
+            }
+          }
+        },
+        {
+          "$project": {
+            "items": {
+              "$slice": ["$items", 5]
+            }
+          }
+        }
+      ],
+      "artists": [
+        {
+          "$unwind": "$tracks"
+        },
+        {
+          "$set": {
+            "credits": {
+              "$zip": {
+                "inputs": [
+                  {
+                    "$ifNull": ["$tracks.artist_ids", []]
+                  },
+                  {
+                    "$ifNull": ["$tracks.artists", []]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "$unwind": "$credits"
+        },
+        {
+          "$group": {
+            "_id": {
+              "listener_id": "$listener_id",
+              "year": "$year",
+              "artist_id": {
+                "$arrayElemAt": ["$credits", 0]
+              },
+              "artist": {
+                "$arrayElemAt": ["$credits", 1]
+              }
+            },
+            "streams": {
+              "$sum": "$tracks.streams"
+            }
+          }
+        },
+        {
+          "$sort": {
+            "_id.listener_id": 1,
+            "_id.year": 1,
+            "streams": -1,
+            "_id.artist_id": 1
+          }
+        },
+        {
+          "$group": {
+            "_id": {
+              "listener_id": "$_id.listener_id",
+              "year": "$_id.year"
+            },
+            "items": {
+              "$push": {
+                "artist_id": "$_id.artist_id",
+                "artist": "$_id.artist",
+                "streams": "$streams"
+              }
+            }
+          }
+        },
+        {
+          "$project": {
+            "items": {
+              "$slice": ["$items", 5]
+            }
+          }
+        }
+      ],
+      "genres": [
+        {
+          "$unwind": "$tracks"
+        },
+        {
+          "$unwind": "$tracks.genres"
+        },
+        {
+          "$group": {
+            "_id": {
+              "listener_id": "$listener_id",
+              "year": "$year",
+              "genre": "$tracks.genres"
+            },
+            "streams": {
+              "$sum": "$tracks.streams"
+            }
+          }
+        },
+        {
+          "$sort": {
+            "_id.listener_id": 1,
+            "_id.year": 1,
+            "streams": -1,
+            "_id.genre": 1
+          }
+        },
+        {
+          "$group": {
+            "_id": {
+              "listener_id": "$_id.listener_id",
+              "year": "$_id.year"
+            },
+            "top_genre": {
+              "$first": {
+                "genre": "$_id.genre",
+                "streams": "$streams"
+              }
+            }
+          }
+        }
+      ],
+      "days": [
+        {
+          "$unwind": "$days"
+        },
+        {
+          "$group": {
+            "_id": {
+              "listener_id": "$listener_id",
+              "year": "$year",
+              "day": "$days.day"
+            },
+            "seconds": {
+              "$sum": "$days.seconds"
+            }
+          }
+        },
+        {
+          "$sort": {
+            "_id.listener_id": 1,
+            "_id.year": 1,
+            "seconds": -1,
+            "_id.day": 1
+          }
+        },
+        {
+          "$group": {
+            "_id": {
+              "listener_id": "$_id.listener_id",
+              "year": "$_id.year"
+            },
+            "peak_day": {
+              "$first": "$_id.day"
+            },
+            "peak_day_seconds": {
+              "$first": "$seconds"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "$unwind": "$totals"
+  },
+  {
+    "$project": {
+      "_id": 0,
+      "listener_id": "$totals._id.listener_id",
+      "year": "$totals._id.year",
+      "plays": "$totals.plays",
+      "streams": "$totals.streams",
+      "total_minutes": {
+        "$round": [
+          {
+            "$divide": ["$totals.seconds", 60]
+          },
+          2
+        ]
+      },
+      "top_tracks": {
+        "$let": {
+          "vars": {
+            "result": {
+              "$arrayElemAt": [
+                {
+                  "$filter": {
+                    "input": "$tracks",
+                    "as": "result",
+                    "cond": {
+                      "$and": [
+                        {
+                          "$eq": [
+                            "$$result._id.listener_id",
+                            "$totals._id.listener_id"
+                          ]
+                        },
+                        {
+                          "$eq": [
+                            "$$result._id.year",
+                            "$totals._id.year"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                },
+                0
+              ]
+            }
+          },
+          "in": {
+            "$ifNull": ["$$result.items", []]
+          }
+        }
+      },
+      "top_artists": {
+        "$let": {
+          "vars": {
+            "result": {
+              "$arrayElemAt": [
+                {
+                  "$filter": {
+                    "input": "$artists",
+                    "as": "result",
+                    "cond": {
+                      "$and": [
+                        {
+                          "$eq": [
+                            "$$result._id.listener_id",
+                            "$totals._id.listener_id"
+                          ]
+                        },
+                        {
+                          "$eq": [
+                            "$$result._id.year",
+                            "$totals._id.year"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                },
+                0
+              ]
+            }
+          },
+          "in": {
+            "$ifNull": ["$$result.items", []]
+          }
+        }
+      },
+      "top_genre": {
+        "$let": {
+          "vars": {
+            "result": {
+              "$arrayElemAt": [
+                {
+                  "$filter": {
+                    "input": "$genres",
+                    "as": "result",
+                    "cond": {
+                      "$and": [
+                        {
+                          "$eq": [
+                            "$$result._id.listener_id",
+                            "$totals._id.listener_id"
+                          ]
+                        },
+                        {
+                          "$eq": [
+                            "$$result._id.year",
+                            "$totals._id.year"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                },
+                0
+              ]
+            }
+          },
+          "in": {
+            "$ifNull": ["$$result.top_genre.genre", null]
+          }
+        }
+      },
+      "peak_day": {
+        "$let": {
+          "vars": {
+            "result": {
+              "$arrayElemAt": [
+                {
+                  "$filter": {
+                    "input": "$days",
+                    "as": "result",
+                    "cond": {
+                      "$and": [
+                        {
+                          "$eq": [
+                            "$$result._id.listener_id",
+                            "$totals._id.listener_id"
+                          ]
+                        },
+                        {
+                          "$eq": [
+                            "$$result._id.year",
+                            "$totals._id.year"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                },
+                0
+              ]
+            }
+          },
+          "in": {
+            "$ifNull": ["$$result.peak_day", null]
+          }
+        }
+      },
+      "peak_day_seconds": {
+        "$let": {
+          "vars": {
+            "result": {
+              "$arrayElemAt": [
+                {
+                  "$filter": {
+                    "input": "$days",
+                    "as": "result",
+                    "cond": {
+                      "$and": [
+                        {
+                          "$eq": [
+                            "$$result._id.listener_id",
+                            "$totals._id.listener_id"
+                          ]
+                        },
+                        {
+                          "$eq": [
+                            "$$result._id.year",
+                            "$totals._id.year"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                },
+                0
+              ]
+            }
+          },
+          "in": {
+            "$ifNull": ["$$result.peak_day_seconds", 0]
+          }
+        }
+      }
+    }
+  },
+  {
+    "$sort": {
+      "year": -1,
+      "listener_id": 1
+    }
+  }
+]

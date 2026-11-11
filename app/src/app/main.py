@@ -1,11 +1,15 @@
 from fastapi import FastAPI
 from sqlalchemy import text
-from app.routers import playback, playlists, subscriptions
+from app.routers import catalogue, charts, payouts, playback, playlists, reports, subscriptions
 
 from app.database import engine, mongo_client, redis_client
 
 app = FastAPI(title="Music Streaming")
 
+app.include_router(catalogue.router)
+app.include_router(charts.router)
+app.include_router(payouts.router)
+app.include_router(reports.router)
 app.include_router(subscriptions.router)
 app.include_router(playlists.router)
 app.include_router(playback.router)

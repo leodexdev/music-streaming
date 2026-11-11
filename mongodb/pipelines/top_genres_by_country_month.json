@@ -1,0 +1,52 @@
+[
+  {
+    "$group": {
+      "_id": {
+        "country": "$country",
+        "month": "$month",
+        "genre": "$genre"
+      },
+      "streams": {
+        "$sum": "$streams"
+      }
+    }
+  },
+  {
+    "$sort": {
+      "_id.country": 1,
+      "_id.month": -1,
+      "streams": -1,
+      "_id.genre": 1
+    }
+  },
+  {
+    "$group": {
+      "_id": {
+        "country": "$_id.country",
+        "month": "$_id.month"
+      },
+      "genres": {
+        "$push": {
+          "genre": "$_id.genre",
+          "stream_count": "$streams"
+        }
+      }
+    }
+  },
+  {
+    "$project": {
+      "_id": 0,
+      "country": "$_id.country",
+      "month": "$_id.month",
+      "top_genres": {
+        "$slice": ["$genres", 5]
+      }
+    }
+  },
+  {
+    "$sort": {
+      "country": 1,
+      "month": -1
+    }
+  }
+]

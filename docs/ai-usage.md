@@ -132,3 +132,30 @@
 **Verification:** TODO: run the trigger tests (3rd member in a duo, 501st playlist track) and `downgrade base` then `upgrade head` before writing "verified"; add the EXPLAIN evidence after the seed.
 **Mistakes caught:** the AI listed some foreign keys (`subscription.plan_id`, `play.listener_id`, `play.track_id`) as not indexed. That is a gap in migration `0001` to decide on, not a finished design. TODO: add anything else found.
 
+## Entry 15: Git workflow, commits and push
+
+**Who:** Tiago.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** checking that our commits are attributed through the author email, splitting the work into small commits, deciding what stays out of them, and the pull request rules (no squash merge).
+**Outcome:** separate commits per concern, with the area in the scope: `feat(postgres)` for the migration and `fix(postgres)` for `env.py`, then `feat(app)` for the settings and database connections, `feat(app)` for F3, `chore(app)` for the `httpx` dependency, `test` for the concurrency script, and `docs` commits for `tasks.md` and `ai-usage`. `.env`, `.env.example` and files that were not ours were left out of every commit. We pushed the app work straight to `main` instead of opening a pull request.
+**Verification:** `git log --author="$(git config user.email)" --oneline -- postgres/` listed both postgres commits, and `git status` never showed `.env`. TODO: run the same command for `app/`, `mongodb/` and `redis/` for both members, and the trainer's per-area loop, before tagging. TODO: turn off squash merging in the repository settings.
+**Mistakes caught:**
+- The AI kept telling me to add `postgres/drafts/subscription.sql` to the commit, which confused me because I had deleted that file on purpose; the deletion only needed to be staged.
+- The AI suggested testing the app on the `tiago` branch before opening a pull request, but I had already pushed to `main`. It then had to warn that the container could restart in a loop for Leo. TODO: write the result of that test.
+- The AI told me to copy a script it had created, without saying that I had to create the file in my own `scripts/` folder first. The path it gave did not exist in my repository.
+
+## Entry 16: F3 join a subscription and the family-plan concurrency test
+
+**Who:** Tiago.
+**Tool:** Claude (Sonnet 5.5), claude.ai.
+**For what:** first draft of flow F3 and of the test for the first concurrent scenario:
+- `app/src/app/deps.py`: the acting listener from the `X-User-Id` header (no authentication, as the rules say).
+- `app/src/app/services/subscription_service.py`: `POST /subscriptions/join` with two modes. Real mode runs in one transaction: read the invite code and its expiry, lock the subscription row with `SELECT ... FOR UPDATE OF s`, refuse a listener who is already a current member, count the members and insert. The member-limit trigger is the last guarantee, and its error code `23514` becomes a 409. Naive mode does the same without the lock and waits 50 ms between the check and the insert so the race shows up.
+- `app/src/app/routers/subscriptions.py`: the endpoint, with `mode=real|naive`.
+- `scripts/concurrency_test.py`: creates and resets its own fixture as the owner role (a `premium_family` subscription with the owner and 1 member, a valid invite code, 50 free listeners), sends the 50 requests at the same moment with `asyncio` and `httpx`, and prints the mode, accepted, refused, 5xx and whether the rule holds. It exits with 1 if the rule is broken or, in real mode, if the result is not the expected one.
+**Outcome:** kept the structure of the service, router and script. The test only deletes rows it created (listeners with the prefix `ct-family-`), so it is safe to run after the seed. In naive mode the script disables the member-limit trigger for the run and enables it again in a `finally` block, because otherwise the trigger would protect the data and hide the race. TODO: write anything we change when we reuse this for the playlist scenario.
+**Verification:** real mode gave 4 accepted, 46 refused, 0 errors and 6 members in PostgreSQL, with exit code 0. Naive mode gave 40 accepted, 10 refused and 42 members in a plan with a limit of 6, with exit code 1, so the race breaks the rule as expected. The naive numbers come from uvicorn running at most 40 requests at the same time: those 40 all counted 2 members, and the other 10 started later and were refused. TODO: run each mode two more times and save the 3 outputs per mode in `docs/concurrency.md`. TODO: check that the trigger is enabled again after the naive run (`tgenabled` in `pg_trigger`). TODO: test the invite code errors (404 for an unknown code, 410 for an expired one) and a listener who is already a member.
+**Mistakes caught:**
+- The first version of the service locked the row with `FOR UPDATE` on a query that joins `subscription` and `plan`. That tries to lock both tables, and the app role only has `SELECT` on `plan`. The endpoint returned a 500, and `FOR UPDATE OF s` (lock only the subscription row, the same as the trigger does) fixed it.
+- The AI assumed the app role already had the grants the endpoint needs (`SELECT, UPDATE` on `subscription`, `SELECT, INSERT, UPDATE` on `subscription_member`, `SELECT` on `invite_code` and `plan`). They do not exist in `scripts/setup.sh` yet, so we created them by hand locally. TODO: Leo adds them to the grants.
+- The AI first assumed that the naive mode would show the race by itself. It would not, because the trigger already enforces the limit, so the test has to disable it.
